@@ -1,0 +1,9 @@
+@import "tailwindcss";
+
+/* Reset mínimo para o React island - não afeta o CSS global da F.R.Y.I.Vs */
+#fryvis-react-root {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}

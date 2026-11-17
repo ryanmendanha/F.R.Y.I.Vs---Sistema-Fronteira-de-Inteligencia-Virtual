@@ -1,0 +1,87 @@
+{
+  "arquivo_dataset": "C:\\Users\\developers\\Desktop\\Senai_projetos\\F.R.Y.I.Vs\\bench\\comandos.jsonl",
+  "total_comandos_base": 105,
+  "total_frases_avaliadas": 315,
+  "acuracia_top1_pct": 99.37,
+  "recall_top3_pct": 99.37,
+  "skills_registradas_total": 43,
+  "skills_cobertas_total": 43,
+  "skills_faltantes": [],
+  "latencia_media_ms": 201.45,
+  "por_categoria": {
+    "Office": {
+      "comandos_base": 16,
+      "frases_avaliadas": 48,
+      "acuracia_top1_pct": 100.0,
+      "recall_top3_pct": 100.0
+    },
+    "Web": {
+      "comandos_base": 16,
+      "frases_avaliadas": 48,
+      "acuracia_top1_pct": 100.0,
+      "recall_top3_pct": 100.0
+    },
+    "Janelas e apps": {
+      "comandos_base": 12,
+      "frases_avaliadas": 36,
+      "acuracia_top1_pct": 100.0,
+      "recall_top3_pct": 100.0
+    },
+    "Sistema": {
+      "comandos_base": 15,
+      "frases_avaliadas": 45,
+      "acuracia_top1_pct": 100.0,
+      "recall_top3_pct": 100.0
+    },
+    "Pesquisa no chat": {
+      "comandos_base": 8,
+      "frases_avaliadas": 24,
+      "acuracia_top1_pct": 100.0,
+      "recall_top3_pct": 100.0
+    },
+    "Memória e RAG": {
+      "comandos_base": 8,
+      "frases_avaliadas": 24,
+      "acuracia_top1_pct": 100.0,
+      "recall_top3_pct": 100.0
+    },
+    "Código (Graphify)": {
+      "comandos_base": 5,
+      "frases_avaliadas": 15,
+      "acuracia_top1_pct": 100.0,
+      "recall_top3_pct": 100.0
+    },
+    "Conversa (sem tool)": {
+      "comandos_base": 10,
+      "frases_avaliadas": 30,
+      "acuracia_top1_pct": 93.33,
+      "recall_top3_pct": 93.33
+    },
+    "Difíceis": {
+      "comandos_base": 15,
+      "frases_avaliadas": 45,
+      "acuracia_top1_pct": 100.0,
+      "recall_top3_pct": 100.0
+    }
+  },
+  "falhas": [
+    {
+      "id": "CNV-003",
+      "categoria": "Conversa (sem tool)",
+      "variante_idx": 2,
+      "frase": "valeu mesmo, excelente trabalho",
+      "esperado": "conversa",
+      "obtido_top1": null,
+      "obtidos_top3": []
+    },
+    {
+      "id": "CNV-010",
+      "categoria": "Conversa (sem tool)",
+      "variante_idx": 1,
+      "frase": "excelente trabalho!",
+      "esperado": "conversa",
+      "obtido_top1": null,
+      "obtidos_top3": []
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/.pytest_cache": true,
+    "FRYIVS_TESTES": true,
+    "audio_cache/tts_*.mp3": true,
+    "audio_cache/audio_*.mp3": true,
+    "audio_cache/*.tmp_*": true
+  }
+}
+

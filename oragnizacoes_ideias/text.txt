@@ -1,0 +1,42 @@
+Criei a pasta base_conhecimento com a habilidade de Excel avançado e os scripts de indexação no ChromaDB. Os scripts passaram na checagem de sintaxe, mas não os executei, porque o ambiente aqui não tem o chromadb nem o Ollama. O arquivo é o base_conhecimento.zip.
+
+Estrutura
+base_conhecimento/
+├── README.md
+├── habilidades/
+│   └── excel_avancado/        ← habilidade 01 (pronta)
+├── informacoes/               ← fatos e documentos de domínio
+├── templates/                 ← modelos reutilizáveis
+├── referencias/               ← glossários e consultas rápidas
+└── ferramentas/               ← scripts do RAG
+A habilidade Excel avançado (11 arquivos)
+Arquivo	Conteúdo
+00	Visão geral, mapa dos arquivos e princípios
+01	Planejamento, arquitetura de abas, tabelas, nomes definidos, padrão de cores
+02	Fórmulas: PROCX, ÍNDICE+CORRESP, SOMASES, matrizes dinâmicas, LET/LAMBDA, datas, financeiras, erros
+03	Tabelas dinâmicas, Power Query, Power Pivot e DAX
+04	Gráficos, dashboards, KPIs, formatação condicional
+05	Validação de dados, proteção e verificações de integridade
+06	Formatação profissional, formatos numéricos, impressão, atalhos
+07	VBA e Office Scripts
+08	Python com openpyxl, XlsxWriter e pandas (código pronto)
+09	Modelagem financeira, cenários, Solver, padrões de negócio
+10	Checklist de qualidade, erros comuns e fluxo de trabalho da IA
+
+As fórmulas aparecem nos nomes em português e em inglês. Cada arquivo tem metadados no topo e seções ## independentes. O script usa cada seção como um trecho (chunk) no ChromaDB, o que melhora a busca.
+
+Scripts do RAG (ferramentas/)
+config.py: modelos, tamanho dos trechos e quantidade de resultados.
+ingestao_chroma.py: lê tudo, divide por seção e indexa. Use --reset para recriar do zero.
+consultar.py: busca os trechos, monta o prompt e responde com o Llama 3.2. Também dá para importar buscar_contexto e responder no código da sua IA.
+Como usar
+bash
+pip install -r ferramentas/requirements.txt
+ollama pull llama3.2
+ollama pull nomic-embed-text
+python ferramentas/ingestao_chroma.py
+python ferramentas/consultar.py "Como montar um dashboard profissional?"
+
+Usei o nomic-embed-text para os embeddings porque o Llama 3.2 não é feito para isso e a busca fica bem melhor com um modelo próprio. Se preferir outro, troque em config.py.
+
+Para conectar ao Node.js ou aos agents do Antigravity, o caminho mais simples é chamar o consultar.py como processo filho e ler a saída. Se quiser, posso montar a ponte em Node ou uma pequena API (FastAPI) que o agente consulte.

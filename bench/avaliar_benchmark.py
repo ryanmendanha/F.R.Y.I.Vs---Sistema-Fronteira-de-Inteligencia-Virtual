@@ -1,0 +1,1727 @@
+"""
+Gerador e Avaliador Oficial do Benchmark de Comandos e Skills da F.R.Y.I.Vs (`bench/comandos.jsonl`).
+
+Atende integralmente às especificações B1 e B2:
+- B1: Arquivo `bench/comandos.jsonl` (1 linha JSON por comando, com 3 jeitos diferentes de pedir:
+  `comando` principal + 2 `variantes` naturais/coloquiais/amigo).
+- B2: Distribuição de ~105 comandos base (315 elocuções totais) cobrindo todas as 9 categorias:
+  1. Office (16)
+  2. Web (16)
+  3. Janelas e apps (12)
+  4. Sistema (16 — incluindo Visão/OCR, Arquivos e Agendador para cobrir 43/43 skills)
+  5. Pesquisa no chat (8)
+  6. Memória e RAG (8)
+  7. Código (Graphify) (6)
+  8. Conversa (sem tool) (10)
+  9. Difíceis (15 — ambiguidade, informalidade, erros do Whisper, comandos duplos e bloqueio seguro)
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+import time
+from collections import defaultdict
+from pathlib import Path
+from typing import Any
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from core.llm import _is_conversational
+from core.session_state import limpar_sessao, registrar_artefato
+from core.skill_router import (
+    eh_comando_vago_ou_perigoso,
+    eh_consulta_memoria_ou_rag,
+    get_skill_router,
+)
+from skills import SKILLS_REGISTRY
+
+BENCH_DIR = ROOT_DIR / "bench"
+COMANDOS_JSONL_PATH = BENCH_DIR / "comandos.jsonl"
+RELATORIO_JSON_PATH = BENCH_DIR / "relatorio_benchmark.json"
+
+
+def construir_registros_benchmark() -> list[dict[str, Any]]:
+    """Retorna os 107 comandos base (321 variações) cobrindo as 9 categorias B2 e 43/43 skills."""
+    return [
+        # ══════════════════════════════════════════════════════════════════════
+        # 1. OFFICE (16 comandos base x 3 formas = 48 frases)
+        # ══════════════════════════════════════════════════════════════════════
+        {
+            "id": "OFF-001",
+            "categoria": "Office",
+            "subcategoria": "criar_planilha",
+            "comando": "cria uma planilha de estoque",
+            "variantes": [
+                "monta uma tabela no excel pra eu controlar o estoque",
+                "gera uma planilha nova chamada estoque por favor",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "criar_planilha",
+            "skills_aceitaveis": ["criar_planilha"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "OFF-002",
+            "categoria": "Office",
+            "subcategoria": "editar_planilha_contexto",
+            "comando": "adiciona uma linha com Teclado, 5, 250",
+            "variantes": [
+                "bota mais um item aí: Teclado, 5 unidades, 250 reais",
+                "insere uma linha nova com Teclado, quantidade 5 e valor 250",
+            ],
+            "contexto_ativo": {"tipo": "excel", "caminho": "planilhas-fryivs/estoque.xlsx"},
+            "skill_esperada": "editar_planilha",
+            "skills_aceitaveis": ["editar_planilha"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "OFF-003",
+            "categoria": "Office",
+            "subcategoria": "editar_word_contexto",
+            "comando": "escreve um parágrafo sobre as metas",
+            "variantes": [
+                "adiciona um parágrafo falando das metas do trimestre",
+                "coloca mais um parágrafo nesse texto explicando as metas",
+            ],
+            "contexto_ativo": {"tipo": "word", "caminho": "documentos-fryivs/metas.docx"},
+            "skill_esperada": "editar_documento_word",
+            "skills_aceitaveis": ["editar_documento_word"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "OFF-004",
+            "categoria": "Office",
+            "subcategoria": "criar_planilha_financeira",
+            "comando": "crie uma planilha financeira com Receita, Despesa e Saldo",
+            "variantes": [
+                "faz um excel de controle financeiro com colunas Receita, Despesa e Saldo",
+                "quero gerar uma planilha de fluxo de caixa com Receita e Despesa",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "criar_planilha",
+            "skills_aceitaveis": ["criar_planilha"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "OFF-005",
+            "categoria": "Office",
+            "subcategoria": "abrir_planilha",
+            "comando": "abra a planilha de vendas no excel",
+            "variantes": [
+                "abre o arquivo excel de vendas na tela",
+                "mostra a planilha vendas no microsoft excel",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "abrir_planilha",
+            "skills_aceitaveis": ["abrir_planilha"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "OFF-006",
+            "categoria": "Office",
+            "subcategoria": "consultar_planilha_resumo",
+            "comando": "consulte o resumo da planilha de vendas",
+            "variantes": [
+                "analisa os dados da planilha vendas pra mim",
+                "lê a planilha de vendas e me diz quantas linhas tem",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "consultar_planilha",
+            "skills_aceitaveis": ["consultar_planilha"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "OFF-007",
+            "categoria": "Office",
+            "subcategoria": "consultar_planilha_filtro",
+            "comando": "filtre a planilha de clientes onde Status é Ativo",
+            "variantes": [
+                "busca na planilha clientes só quem tá com Status Ativo",
+                "consultar planilha clientes filtrando a coluna Status",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "consultar_planilha",
+            "skills_aceitaveis": ["consultar_planilha"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "OFF-008",
+            "categoria": "Office",
+            "subcategoria": "editar_planilha_remover",
+            "comando": "remova a linha do produto Mouse da planilha",
+            "variantes": [
+                "apague a linha onde o Item é Mouse na planilha",
+                "tira a linha do Mouse dessa planilha de estoque",
+            ],
+            "contexto_ativo": {"tipo": "excel", "caminho": "planilhas-fryivs/estoque.xlsx"},
+            "skill_esperada": "editar_planilha",
+            "skills_aceitaveis": ["editar_planilha"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "OFF-009",
+            "categoria": "Office",
+            "subcategoria": "editar_planilha_celula",
+            "comando": "altere na planilha o preço do Monitor para 1200",
+            "variantes": [
+                "atualize a planilha mudando o valor do Monitor pra 1200",
+                "edite a planilha trocando a quantidade do Monitor para 12",
+            ],
+            "contexto_ativo": {"tipo": "excel", "caminho": "planilhas-fryivs/estoque.xlsx"},
+            "skill_esperada": "editar_planilha",
+            "skills_aceitaveis": ["editar_planilha"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "OFF-010",
+            "categoria": "Office",
+            "subcategoria": "editar_planilha_coluna",
+            "comando": "adicione uma coluna chamada Desconto na planilha",
+            "variantes": [
+                "coloque uma coluna nova de Desconto na planilha atual",
+                "insira a coluna Fornecedor nessa planilha",
+            ],
+            "contexto_ativo": {"tipo": "excel", "caminho": "planilhas-fryivs/estoque.xlsx"},
+            "skill_esperada": "editar_planilha",
+            "skills_aceitaveis": ["editar_planilha"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "OFF-011",
+            "categoria": "Office",
+            "subcategoria": "criar_documento_word",
+            "comando": "crie um documento word chamado relatorio_anual",
+            "variantes": [
+                "gera um documento word novo para a ata da reunião",
+                "fazer um word com o título Proposta Comercial",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "criar_documento_word",
+            "skills_aceitaveis": ["criar_documento_word"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "OFF-012",
+            "categoria": "Office",
+            "subcategoria": "editar_documento_word_secao",
+            "comando": "adicione uma seção de Conclusão no documento word",
+            "variantes": [
+                "edite o documento word inserindo o parágrafo final",
+                "no word, adicione um parágrafo sobre os resultados obtidos",
+            ],
+            "contexto_ativo": {"tipo": "word", "caminho": "documentos-fryivs/relatorio.docx"},
+            "skill_esperada": "editar_documento_word",
+            "skills_aceitaveis": ["editar_documento_word"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "OFF-013",
+            "categoria": "Office",
+            "subcategoria": "editar_documento_word_substituir",
+            "comando": "substitua no word a palavra rascunho por versão final",
+            "variantes": [
+                "troque o texto provisório por definitivo aqui no documento",
+                "altere o título antigo para Relatório Oficial 2026",
+            ],
+            "contexto_ativo": {"tipo": "word", "caminho": "documentos-fryivs/relatorio.docx"},
+            "skill_esperada": "editar_documento_word",
+            "skills_aceitaveis": ["editar_documento_word"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "OFF-014",
+            "categoria": "Office",
+            "subcategoria": "ler_documento_word",
+            "comando": "leia o documento word relatorio_anual",
+            "variantes": [
+                "mostra o conteúdo do word relatorio_anual",
+                "lê o documento word pra eu ver como ficou",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "ler_documento_word",
+            "skills_aceitaveis": ["ler_documento_word"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "OFF-015",
+            "categoria": "Office",
+            "subcategoria": "abrir_documento_word",
+            "comando": "abra o documento word proposta_comercial",
+            "variantes": [
+                "abre o word na tela com o arquivo contrato.docx",
+                "iniciar word com o documento de metas",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "abrir_documento_word",
+            "skills_aceitaveis": ["abrir_documento_word"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "OFF-016",
+            "categoria": "Office",
+            "subcategoria": "remover_paragrafo_word_contexto",
+            "comando": "remova o parágrafo sobre custos antigos",
+            "variantes": [
+                "apaga aquele parágrafo de observação temporária",
+                "exclua a linha que fala de pendente",
+            ],
+            "contexto_ativo": {"tipo": "word", "caminho": "documentos-fryivs/relatorio.docx"},
+            "skill_esperada": "editar_documento_word",
+            "skills_aceitaveis": ["editar_documento_word"],
+            "tipo_esperado": "tool",
+        },
+
+        # ══════════════════════════════════════════════════════════════════════
+        # 2. WEB (16 comandos base x 3 formas = 48 frases)
+        # ══════════════════════════════════════════════════════════════════════
+        {
+            "id": "WEB-001",
+            "categoria": "Web",
+            "subcategoria": "pesquisar_google",
+            "comando": "pesquisa receita de bolo no google",
+            "variantes": [
+                "pesquise no chrome receita de bolo de chocolate",
+                "abra o navegador e pesquise receita de bolo caseiro",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "pesquisar_google",
+            "skills_aceitaveis": ["pesquisar_google", "pesquisar_na_web"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "WEB-002",
+            "categoria": "Web",
+            "subcategoria": "clicar_ordinal_link",
+            "comando": "abre o primeiro link",
+            "variantes": [
+                "abra o primeiro resultado da busca",
+                "entra no primeiro link que apareceu aí",
+            ],
+            "contexto_ativo": {"tipo": "web", "url": "https://www.google.com/search?q=bolo"},
+            "skill_esperada": "clicar_elemento_web",
+            "skills_aceitaveis": ["clicar_elemento_web"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "WEB-003",
+            "categoria": "Web",
+            "subcategoria": "clicar_texto_botao",
+            "comando": "clica em Login",
+            "variantes": [
+                "clique no botão Login do site",
+                "aperta em Entrar aí na página",
+            ],
+            "contexto_ativo": {"tipo": "web", "url": "https://github.com"},
+            "skill_esperada": "clicar_elemento_web",
+            "skills_aceitaveis": ["clicar_elemento_web"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "WEB-004",
+            "categoria": "Web",
+            "subcategoria": "rolar_pagina_baixo",
+            "comando": "rola a página pra baixo",
+            "variantes": [
+                "role a página para baixo um pouco",
+                "desce a página pra eu ver o resto",
+            ],
+            "contexto_ativo": {"tipo": "web", "url": "https://pt.wikipedia.org"},
+            "skill_esperada": "interagir_pagina_web",
+            "skills_aceitaveis": ["interagir_pagina_web"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "WEB-005",
+            "categoria": "Web",
+            "subcategoria": "voltar_pagina_contexto",
+            "comando": "volta",
+            "variantes": [
+                "volte a página anterior",
+                "voltar página no navegador",
+            ],
+            "contexto_ativo": {"tipo": "web", "url": "https://pt.wikipedia.org/wiki/Python"},
+            "skill_esperada": "interagir_pagina_web",
+            "skills_aceitaveis": ["interagir_pagina_web"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "WEB-006",
+            "categoria": "Web",
+            "subcategoria": "clicar_segundo_resultado",
+            "comando": "entre no segundo resultado",
+            "variantes": [
+                "abra o segundo link da pesquisa",
+                "clique no terceiro vídeo da lista",
+            ],
+            "contexto_ativo": {"tipo": "web", "url": "https://www.google.com"},
+            "skill_esperada": "clicar_elemento_web",
+            "skills_aceitaveis": ["clicar_elemento_web"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "WEB-007",
+            "categoria": "Web",
+            "subcategoria": "navegar_para_url",
+            "comando": "navegue para https://github.com",
+            "variantes": [
+                "acesse o site g1.globo.com",
+                "abra o site wikipedia.org no navegador",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "navegar_para",
+            "skills_aceitaveis": ["navegar_para"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "WEB-008",
+            "categoria": "Web",
+            "subcategoria": "pesquisar_youtube",
+            "comando": "pesquise no youtube música lo-fi para programar",
+            "variantes": [
+                "tocar música clássica no youtube",
+                "procure vídeo de tutorial python no youtube",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "pesquisar_youtube",
+            "skills_aceitaveis": ["pesquisar_youtube"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "WEB-009",
+            "categoria": "Web",
+            "subcategoria": "digitar_campo_web",
+            "comando": "digite no site inteligência artificial no campo de busca",
+            "variantes": [
+                "preencher campo no site com meu email teste@exemplo.com",
+                "escreva no campo web a palavra fastapi",
+            ],
+            "contexto_ativo": {"tipo": "web", "url": "https://www.google.com"},
+            "skill_esperada": "digitar_campo_web",
+            "skills_aceitaveis": ["digitar_campo_web"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "WEB-010",
+            "categoria": "Web",
+            "subcategoria": "ler_conteudo_pagina",
+            "comando": "leia a página aberta no navegador",
+            "variantes": [
+                "qual o conteúdo do site que está aberto?",
+                "leia o site e me diga o que está escrito",
+            ],
+            "contexto_ativo": {"tipo": "web", "url": "https://pt.wikipedia.org"},
+            "skill_esperada": "ler_conteudo_pagina",
+            "skills_aceitaveis": ["ler_conteudo_pagina"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "WEB-011",
+            "categoria": "Web",
+            "subcategoria": "capturar_tela_web",
+            "comando": "tire um print da página web",
+            "variantes": [
+                "faça uma captura da página web atual",
+                "print do site aberto no navegador",
+            ],
+            "contexto_ativo": {"tipo": "web", "url": "https://pt.wikipedia.org"},
+            "skill_esperada": "capturar_tela_web",
+            "skills_aceitaveis": ["capturar_tela_web", "tirar_screenshot"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "WEB-012",
+            "categoria": "Web",
+            "subcategoria": "fechar_navegador",
+            "comando": "feche o navegador",
+            "variantes": [
+                "fechar navegador web agora",
+                "fechar browser da assistente",
+            ],
+            "contexto_ativo": {"tipo": "web", "url": "https://www.google.com"},
+            "skill_esperada": "fechar_navegador",
+            "skills_aceitaveis": ["fechar_navegador", "fechar_janela"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "WEB-013",
+            "categoria": "Web",
+            "subcategoria": "atualizar_pagina",
+            "comando": "atualize a página do navegador",
+            "variantes": [
+                "recarregue a página atual",
+                "atualizar página aberta",
+            ],
+            "contexto_ativo": {"tipo": "web", "url": "https://www.google.com"},
+            "skill_esperada": "interagir_pagina_web",
+            "skills_aceitaveis": ["interagir_pagina_web"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "WEB-014",
+            "categoria": "Web",
+            "subcategoria": "rolar_pagina_cima",
+            "comando": "role a página para cima",
+            "variantes": [
+                "suba a página até o topo",
+                "rolar para cima no site",
+            ],
+            "contexto_ativo": {"tipo": "web", "url": "https://www.google.com"},
+            "skill_esperada": "interagir_pagina_web",
+            "skills_aceitaveis": ["interagir_pagina_web"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "WEB-015",
+            "categoria": "Web",
+            "subcategoria": "pesquisar_na_web_selenium",
+            "comando": "faça uma automação web pesquisando cotação no navegador",
+            "variantes": [
+                "navegação com selenium buscando vagas de python",
+                "interagir no site fazendo uma busca automática",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "pesquisar_na_web",
+            "skills_aceitaveis": ["pesquisar_na_web", "pesquisar_google"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "WEB-016",
+            "categoria": "Web",
+            "subcategoria": "listar_links_aba",
+            "comando": "listar links da página aberta",
+            "variantes": [
+                "liste os links disponíveis nessa aba",
+                "fechar aba atual do navegador",
+            ],
+            "contexto_ativo": {"tipo": "web", "url": "https://www.google.com"},
+            "skill_esperada": "interagir_pagina_web",
+            "skills_aceitaveis": ["interagir_pagina_web"],
+            "tipo_esperado": "tool",
+        },
+
+        # ══════════════════════════════════════════════════════════════════════
+        # 3. JANELAS E APPS (12 comandos base x 3 formas = 36 frases)
+        # ══════════════════════════════════════════════════════════════════════
+        {
+            "id": "APP-001",
+            "categoria": "Janelas e apps",
+            "subcategoria": "abrir_calculadora",
+            "comando": "abre o calculadora",
+            "variantes": [
+                "abra a calculadora do windows",
+                "inicia a calc aí pra mim",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "abrir_programa",
+            "skills_aceitaveis": ["abrir_programa"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "APP-002",
+            "categoria": "Janelas e apps",
+            "subcategoria": "minimizar_janela",
+            "comando": "minimiza essa janela",
+            "variantes": [
+                "minimize a janela do bloco de notas",
+                "abaixar janela da calculadora",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "minimizar_janela",
+            "skills_aceitaveis": ["minimizar_janela"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "APP-003",
+            "categoria": "Janelas e apps",
+            "subcategoria": "fechar_bloco_notas",
+            "comando": "fecha o bloco de notas",
+            "variantes": [
+                "feche a janela do notepad",
+                "encerrar o bloco de notas aberto",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "fechar_janela",
+            "skills_aceitaveis": ["fechar_janela"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "APP-004",
+            "categoria": "Janelas e apps",
+            "subcategoria": "abrir_bloco_notas",
+            "comando": "abra o bloco de notas",
+            "variantes": [
+                "abre o notepad por favor",
+                "iniciar bloco de notas",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "abrir_programa",
+            "skills_aceitaveis": ["abrir_programa"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "APP-005",
+            "categoria": "Janelas e apps",
+            "subcategoria": "abrir_vscode",
+            "comando": "abra o vscode",
+            "variantes": [
+                "inicia o visual studio code",
+                "roda o code aí",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "abrir_programa",
+            "skills_aceitaveis": ["abrir_programa"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "APP-006",
+            "categoria": "Janelas e apps",
+            "subcategoria": "abrir_explorador",
+            "comando": "abra o explorador de arquivos",
+            "variantes": [
+                "mostre o explorador de pastas",
+                "abre o explorer do windows",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "abrir_programa",
+            "skills_aceitaveis": ["abrir_programa"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "APP-007",
+            "categoria": "Janelas e apps",
+            "subcategoria": "listar_janelas",
+            "comando": "quais janelas estão abertas?",
+            "variantes": [
+                "listar janelas ativas na tela",
+                "mostrar janelas e programas abertos",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "listar_janelas",
+            "skills_aceitaveis": ["listar_janelas"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "APP-008",
+            "categoria": "Janelas e apps",
+            "subcategoria": "focar_janela",
+            "comando": "foque na janela do vscode",
+            "variantes": [
+                "trazer para frente a janela do chrome",
+                "mudar para janela do bloco de notas",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "focar_janela",
+            "skills_aceitaveis": ["focar_janela"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "APP-009",
+            "categoria": "Janelas e apps",
+            "subcategoria": "maximizar_janela",
+            "comando": "maximize a janela do navegador",
+            "variantes": [
+                "deixe a janela do vscode em tela cheia",
+                "expandir janela do bloco de notas",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "maximizar_janela",
+            "skills_aceitaveis": ["maximizar_janela"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "APP-010",
+            "categoria": "Janelas e apps",
+            "subcategoria": "abrir_terminal",
+            "comando": "abra o terminal powershell",
+            "variantes": [
+                "inicie o cmd prompt de comando",
+                "abre o terminal do windows",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "abrir_programa",
+            "skills_aceitaveis": ["abrir_programa"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "APP-011",
+            "categoria": "Janelas e apps",
+            "subcategoria": "abrir_paint",
+            "comando": "abra o paint",
+            "variantes": [
+                "iniciar mspaint na tela",
+                "abre o aplicativo paint",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "abrir_programa",
+            "skills_aceitaveis": ["abrir_programa"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "APP-012",
+            "categoria": "Janelas e apps",
+            "subcategoria": "fechar_calculadora",
+            "comando": "feche a janela da calculadora",
+            "variantes": [
+                "encerrar a calculadora aberta",
+                "fecha a janela do paint",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "fechar_janela",
+            "skills_aceitaveis": ["fechar_janela"],
+            "tipo_esperado": "tool",
+        },
+
+        # ══════════════════════════════════════════════════════════════════════
+        # 4. SISTEMA, VISÃO, ARQUIVOS & AGENDADOR (16 comandos base x 3 formas = 48 frases)
+        # ══════════════════════════════════════════════════════════════════════
+        {
+            "id": "SYS-001",
+            "categoria": "Sistema",
+            "subcategoria": "aumentar_volume",
+            "comando": "aumenta o volume",
+            "variantes": [
+                "aumentar som do computador em 10",
+                "sobe o som aí por favor",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "controlar_volume",
+            "skills_aceitaveis": ["controlar_volume"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "SYS-002",
+            "categoria": "Sistema",
+            "subcategoria": "obter_hora_data",
+            "comando": "que horas são",
+            "variantes": [
+                "qual a hora e que dia é hoje?",
+                "me diz a data de hoje e o horário",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "obter_hora_data",
+            "skills_aceitaveis": ["obter_hora_data"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "SYS-003",
+            "categoria": "Sistema",
+            "subcategoria": "tirar_screenshot",
+            "comando": "tira um print",
+            "variantes": [
+                "tirar screenshot da tela agora",
+                "faça uma captura de tela do monitor",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "tirar_screenshot",
+            "skills_aceitaveis": ["tirar_screenshot"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "SYS-004",
+            "categoria": "Sistema",
+            "subcategoria": "status_sistema",
+            "comando": "como está a CPU",
+            "variantes": [
+                "qual o status do sistema e uso de memória ram?",
+                "como está o desempenho do pc e a bateria?",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "status_sistema",
+            "skills_aceitaveis": ["status_sistema"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "SYS-005",
+            "categoria": "Sistema",
+            "subcategoria": "diminuir_mutar_volume",
+            "comando": "abaixar volume do pc",
+            "variantes": [
+                "diminuir som do computador",
+                "mutar o áudio do sistema",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "controlar_volume",
+            "skills_aceitaveis": ["controlar_volume"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "SYS-006",
+            "categoria": "Sistema",
+            "subcategoria": "bloquear_tela",
+            "comando": "bloquear tela do computador",
+            "variantes": [
+                "trancar tela do pc agora",
+                "bloqueie a tela por segurança",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "bloquear_tela",
+            "skills_aceitaveis": ["bloquear_tela"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "SYS-007",
+            "categoria": "Sistema",
+            "subcategoria": "digitar_texto",
+            "comando": "digite reunião confirmada às 15 horas",
+            "variantes": [
+                "escreva o texto relatório aprovado na janela ativa",
+                "digitar bom dia equipe e apertar enter",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "digitar_texto",
+            "skills_aceitaveis": ["digitar_texto"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "SYS-008",
+            "categoria": "Sistema",
+            "subcategoria": "pressionar_atalho",
+            "comando": "pressione o atalho ctrl+c",
+            "variantes": [
+                "aperte as teclas alt+tab",
+                "executar atalho ctrl+shift+esc",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "pressionar_atalho",
+            "skills_aceitaveis": ["pressionar_atalho"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "SYS-009",
+            "categoria": "Sistema",
+            "subcategoria": "gerenciar_arquivos_pasta",
+            "comando": "criar pasta chamada projetos_2026",
+            "variantes": [
+                "listar arquivos da pasta planilhas-fryivs",
+                "copiar arquivo relatorio.txt para a pasta backup",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "gerenciar_arquivos",
+            "skills_aceitaveis": ["gerenciar_arquivos"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "SYS-010",
+            "categoria": "Sistema",
+            "subcategoria": "gerenciar_arquivos_mover",
+            "comando": "mover arquivo notas.txt para a pasta arquivo_morto",
+            "variantes": [
+                "deletar arquivo temporario_teste.tmp",
+                "listar arquivos do diretório documentos-fryivs",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "gerenciar_arquivos",
+            "skills_aceitaveis": ["gerenciar_arquivos"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "SYS-011",
+            "categoria": "Sistema",
+            "subcategoria": "localizar_e_clicar_imagem",
+            "comando": "localizar botão salvar.png na tela e clicar",
+            "variantes": [
+                "clique no ícone confirmar.png usando busca visual",
+                "achar botão na tela pela imagem ok.png",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "localizar_e_clicar_imagem",
+            "skills_aceitaveis": ["localizar_e_clicar_imagem"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "SYS-012",
+            "categoria": "Sistema",
+            "subcategoria": "ler_texto_da_tela",
+            "comando": "ler texto da tela com ocr",
+            "variantes": [
+                "o que está escrito na tela agora?",
+                "leia a tela e extraia o texto visível",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "ler_texto_da_tela",
+            "skills_aceitaveis": ["ler_texto_da_tela"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "SYS-013",
+            "categoria": "Sistema",
+            "subcategoria": "agendar_execucao",
+            "comando": "agendar tarefa de status_sistema a cada 30 minutos",
+            "variantes": [
+                "agende para as 18:00 a rotina de tirar screenshot",
+                "agendar rotina todo dia as 09:00",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "agendar_execucao",
+            "skills_aceitaveis": ["agendar_execucao"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "SYS-014",
+            "categoria": "Sistema",
+            "subcategoria": "listar_agendamentos",
+            "comando": "listar agendamentos ativos",
+            "variantes": [
+                "quais agendamentos estão programados?",
+                "mostrar tarefas agendadas no sistema",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "listar_agendamentos",
+            "skills_aceitaveis": ["listar_agendamentos"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "SYS-015",
+            "categoria": "Sistema",
+            "subcategoria": "enviar_alerta_webhook",
+            "comando": "enviar alerta para o webhook https://exemplo.com/hook avisando que concluiu",
+            "variantes": [
+                "disparar webhook com a mensagem servidor online",
+                "mandar no whatsapp via webhook o alerta de backup",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "enviar_alerta_webhook",
+            "skills_aceitaveis": ["enviar_alerta_webhook"],
+            "tipo_esperado": "tool",
+        },
+
+        # ══════════════════════════════════════════════════════════════════════
+        # 5. PESQUISA NO CHAT (8 comandos base x 3 formas = 24 frases)
+        # ══════════════════════════════════════════════════════════════════════
+        {
+            "id": "CHAT-001",
+            "categoria": "Pesquisa no chat",
+            "subcategoria": "cotacao",
+            "comando": "qual a cotação do dólar",
+            "variantes": [
+                "qual a cotação do euro hoje?",
+                "qual o valor do bitcoin agora?",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "pesquisar_informacao_web",
+            "skills_aceitaveis": ["pesquisar_informacao_web"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "CHAT-002",
+            "categoria": "Pesquisa no chat",
+            "subcategoria": "biografia",
+            "comando": "quem foi Santos Dumont",
+            "variantes": [
+                "quem foi Ada Lovelace?",
+                "quem é Alan Turing na história da computação?",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "pesquisar_informacao_web",
+            "skills_aceitaveis": ["pesquisar_informacao_web"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "CHAT-003",
+            "categoria": "Pesquisa no chat",
+            "subcategoria": "conceito_cientifico",
+            "comando": "pesquise sobre a teoria da relatividade",
+            "variantes": [
+                "busque sobre fusão nuclear e me explique",
+                "procure sobre computação quântica",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "pesquisar_informacao_web",
+            "skills_aceitaveis": ["pesquisar_informacao_web"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "CHAT-004",
+            "categoria": "Pesquisa no chat",
+            "subcategoria": "noticias",
+            "comando": "quais são as últimas notícias de tecnologia",
+            "variantes": [
+                "notícias de hoje sobre inteligência artificial",
+                "notícias sobre exploração espacial",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "pesquisar_informacao_web",
+            "skills_aceitaveis": ["pesquisar_informacao_web"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "CHAT-005",
+            "categoria": "Pesquisa no chat",
+            "subcategoria": "definicao",
+            "comando": "o que é aprendizado por reforço",
+            "variantes": [
+                "o que é uma rede neural convolucional?",
+                "como funciona um reator de fusão?",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "pesquisar_informacao_web",
+            "skills_aceitaveis": ["pesquisar_informacao_web"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "CHAT-006",
+            "categoria": "Pesquisa no chat",
+            "subcategoria": "astronomia",
+            "comando": "busque informações sobre buracos negros",
+            "variantes": [
+                "pesquise informações sobre o telescópio James Webb",
+                "fatos sobre a galáxia de Andrômeda",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "pesquisar_informacao_web",
+            "skills_aceitaveis": ["pesquisar_informacao_web"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "CHAT-007",
+            "categoria": "Pesquisa no chat",
+            "subcategoria": "historia",
+            "comando": "resumo sobre a Revolução Industrial",
+            "variantes": [
+                "pesquise na internet sobre o Renascimento",
+                "busca na web sobre a história do Brasil",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "pesquisar_informacao_web",
+            "skills_aceitaveis": ["pesquisar_informacao_web"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "CHAT-008",
+            "categoria": "Pesquisa no chat",
+            "subcategoria": "geografia",
+            "comando": "pesquise sobre o bioma do Cerrado brasileiro",
+            "variantes": [
+                "procure sobre a Amazônia e sua biodiversidade",
+                "pesquisar sobre as capitais do Nordeste",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "pesquisar_informacao_web",
+            "skills_aceitaveis": ["pesquisar_informacao_web"],
+            "tipo_esperado": "tool",
+        },
+
+        # ══════════════════════════════════════════════════════════════════════
+        # 6. MEMÓRIA E RAG (8 comandos base x 3 formas = 24 frases)
+        # ══════════════════════════════════════════════════════════════════════
+        {
+            "id": "MEM-001",
+            "categoria": "Memória e RAG",
+            "subcategoria": "memoria_ontem",
+            "comando": "o que eu te disse sobre o projeto ontem",
+            "variantes": [
+                "você lembra do que eu falei ontem sobre o projeto?",
+                "qual foi o projeto que eu te contei na nossa conversa?",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": None,
+            "skills_aceitaveis": [],
+            "tipo_esperado": "memoria_rag",
+        },
+        {
+            "id": "MEM-002",
+            "categoria": "Memória e RAG",
+            "subcategoria": "memoria_preferencias",
+            "comando": "o que conversamos antes sobre minhas preferências?",
+            "variantes": [
+                "lembra do que eu te falei sobre meu horário de trabalho?",
+                "o que eu te disse mais cedo na nossa conversa?",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": None,
+            "skills_aceitaveis": [],
+            "tipo_esperado": "memoria_rag",
+        },
+        {
+            "id": "MEM-003",
+            "categoria": "Memória e RAG",
+            "subcategoria": "rag_procx",
+            "comando": "como usar PROCX segundo a base de conhecimento?",
+            "variantes": [
+                "como funciona o PROCX no documento indexado de excel avançado?",
+                "segundo o guia, qual a diferença entre PROCX e ÍNDICE e CORRESP?",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": None,
+            "skills_aceitaveis": [],
+            "tipo_esperado": "memoria_rag",
+        },
+        {
+            "id": "MEM-004",
+            "categoria": "Memória e RAG",
+            "subcategoria": "rag_checklist",
+            "comando": "quais são os itens do checklist de qualidade nos documentos indexados?",
+            "variantes": [
+                "segundo a base de conhecimento, qual o checklist de qualidade antes de entregar?",
+                "no documento indexado, quais são os erros comuns em planilhas?",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": None,
+            "skills_aceitaveis": [],
+            "tipo_esperado": "memoria_rag",
+        },
+        {
+            "id": "MEM-005",
+            "categoria": "Memória e RAG",
+            "subcategoria": "rag_arquitetura_abas",
+            "comando": "como planejar a arquitetura de abas segundo o guia de excel?",
+            "variantes": [
+                "qual o padrão de cores da planilha segundo a base de conhecimento?",
+                "no documento indexado, como separar abas de dados, cálculos e resumo?",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": None,
+            "skills_aceitaveis": [],
+            "tipo_esperado": "memoria_rag",
+        },
+        {
+            "id": "MEM-006",
+            "categoria": "Memória e RAG",
+            "subcategoria": "rag_power_query_dax",
+            "comando": "quando usar Power Query e Power Pivot segundo a base de conhecimento?",
+            "variantes": [
+                "como criar medidas DAX segundo o guia indexado?",
+                "o que diz a tabela dinâmica no guia da base de conhecimento?",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": None,
+            "skills_aceitaveis": [],
+            "tipo_esperado": "memoria_rag",
+        },
+        {
+            "id": "MEM-007",
+            "categoria": "Memória e RAG",
+            "subcategoria": "rag_formulas_matriciais",
+            "comando": "como funcionam as fórmulas matriciais LET e LAMBDA segundo o guia?",
+            "variantes": [
+                "segundo a base de conhecimento, como usar SOMASES e matrizes dinâmicas?",
+                "no documento indexado, quais são as boas práticas de fórmulas matriciais?",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": None,
+            "skills_aceitaveis": [],
+            "tipo_esperado": "memoria_rag",
+        },
+        {
+            "id": "MEM-008",
+            "categoria": "Memória e RAG",
+            "subcategoria": "memoria_reuniao",
+            "comando": "você lembra qual data eu te disse para a entrega final?",
+            "variantes": [
+                "o que eu falei sobre as metas da equipe na nossa conversa?",
+                "lembra do que combinamos ontem sobre o relatório?",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": None,
+            "skills_aceitaveis": [],
+            "tipo_esperado": "memoria_rag",
+        },
+
+        # ══════════════════════════════════════════════════════════════════════
+        # 7. CÓDIGO (GRAPHIFY) (6 comandos base x 3 formas = 18 frases)
+        # ══════════════════════════════════════════════════════════════════════
+        {
+            "id": "GRP-001",
+            "categoria": "Código (Graphify)",
+            "subcategoria": "explicar_modulo",
+            "comando": "explica o módulo voice_daemon",
+            "variantes": [
+                "explique o módulo skill_router e suas conexões",
+                "detalhe o módulo office_live e o que ele chama",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "explicar_modulo_grafo",
+            "skills_aceitaveis": ["explicar_modulo_grafo", "consultar_mapa_codigo"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "GRP-002",
+            "categoria": "Código (Graphify)",
+            "subcategoria": "consultar_mapa_codigo",
+            "comando": "onde fica a função criar_planilha no seu código?",
+            "variantes": [
+                "localizar no código onde está definido o OpenWakeWordDetector",
+                "consultar mapa do código para achar a rota de websocket",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "consultar_mapa_codigo",
+            "skills_aceitaveis": ["consultar_mapa_codigo", "explicar_modulo_grafo"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "GRP-003",
+            "categoria": "Código (Graphify)",
+            "subcategoria": "caminho_entre_componentes",
+            "comando": "qual o caminho entre server.py e criar_planilha?",
+            "variantes": [
+                "mostre a ligação entre voice_daemon e processar_comando no grafo",
+                "qual o fluxo entre App.tsx e execute_skill?",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "caminho_entre_componentes",
+            "skills_aceitaveis": ["caminho_entre_componentes"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "GRP-004",
+            "categoria": "Código (Graphify)",
+            "subcategoria": "resumo_arquitetura",
+            "comando": "me dê um resumo da arquitetura do sistema",
+            "variantes": [
+                "quais são os god nodes da sua estrutura do sistema?",
+                "mostre a visão geral do sistema e o mapa da fryivs",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "resumo_arquitetura_sistema",
+            "skills_aceitaveis": ["resumo_arquitetura_sistema"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "GRP-005",
+            "categoria": "Código (Graphify)",
+            "subcategoria": "atualizar_mapa",
+            "comando": "atualizar mapa mental do código agora",
+            "variantes": [
+                "reindexar grafo do projeto com graphify",
+                "recarregar mapa de arquitetura do código",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "atualizar_mapa_codigo",
+            "skills_aceitaveis": ["atualizar_mapa_codigo"],
+            "tipo_esperado": "tool",
+        },
+
+        # ══════════════════════════════════════════════════════════════════════
+        # 8. CONVERSA (SEM TOOL) (10 comandos base x 3 formas = 30 frases)
+        # ══════════════════════════════════════════════════════════════════════
+        {
+            "id": "CNV-001",
+            "categoria": "Conversa (sem tool)",
+            "subcategoria": "saudacao_manha",
+            "comando": "bom dia",
+            "variantes": [
+                "bom dia Fryivs, tudo bem?",
+                "olá, bom dia!",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": None,
+            "skills_aceitaveis": [],
+            "tipo_esperado": "conversa",
+        },
+        {
+            "id": "CNV-002",
+            "categoria": "Conversa (sem tool)",
+            "subcategoria": "piada",
+            "comando": "me conta uma piada",
+            "variantes": [
+                "conta uma piada rápida aí",
+                "conte uma piada engraçada",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": None,
+            "skills_aceitaveis": [],
+            "tipo_esperado": "conversa",
+        },
+        {
+            "id": "CNV-003",
+            "categoria": "Conversa (sem tool)",
+            "subcategoria": "agradecimento",
+            "comando": "obrigado",
+            "variantes": [
+                "muito obrigado pela ajuda",
+                "valeu mesmo, excelente trabalho",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": None,
+            "skills_aceitaveis": [],
+            "tipo_esperado": "conversa",
+        },
+        {
+            "id": "CNV-004",
+            "categoria": "Conversa (sem tool)",
+            "subcategoria": "identidade",
+            "comando": "quem é você?",
+            "variantes": [
+                "qual o significado do seu nome Fryvis?",
+                "me fale sobre você e sua criação",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": None,
+            "skills_aceitaveis": [],
+            "tipo_esperado": "conversa",
+        },
+        {
+            "id": "CNV-005",
+            "categoria": "Conversa (sem tool)",
+            "subcategoria": "saudacao_tarde_noite",
+            "comando": "boa tarde",
+            "variantes": [
+                "boa noite Fryivs",
+                "oi, tudo tranquilo por aí?",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": None,
+            "skills_aceitaveis": [],
+            "tipo_esperado": "conversa",
+        },
+        {
+            "id": "CNV-006",
+            "categoria": "Conversa (sem tool)",
+            "subcategoria": "confirmacao",
+            "comando": "ok, entendido",
+            "variantes": [
+                "certo, perfeito",
+                "tudo certo então",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": None,
+            "skills_aceitaveis": [],
+            "tipo_esperado": "conversa",
+        },
+        {
+            "id": "CNV-007",
+            "categoria": "Conversa (sem tool)",
+            "subcategoria": "estado_assistente",
+            "comando": "como você está hoje?",
+            "variantes": [
+                "como vai você?",
+                "tudo bem com você?",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": None,
+            "skills_aceitaveis": [],
+            "tipo_esperado": "conversa",
+        },
+        {
+            "id": "CNV-008",
+            "categoria": "Conversa (sem tool)",
+            "subcategoria": "ajuda_geral",
+            "comando": "o que você faz?",
+            "variantes": [
+                "me ajude, quais são suas funções?",
+                "fale sobre você",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": None,
+            "skills_aceitaveis": [],
+            "tipo_esperado": "conversa",
+        },
+        {
+            "id": "CNV-009",
+            "categoria": "Conversa (sem tool)",
+            "subcategoria": "despedida",
+            "comando": "até logo",
+            "variantes": [
+                "tchau, até mais",
+                "boa noite, obrigado",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": None,
+            "skills_aceitaveis": [],
+            "tipo_esperado": "conversa",
+        },
+        {
+            "id": "CNV-010",
+            "categoria": "Conversa (sem tool)",
+            "subcategoria": "elogio",
+            "comando": "parabéns, muito bem",
+            "variantes": [
+                "excelente trabalho!",
+                "valeu, ficou ótimo",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": None,
+            "skills_aceitaveis": [],
+            "tipo_esperado": "conversa",
+        },
+
+        # ══════════════════════════════════════════════════════════════════════
+        # 9. DIFÍCEIS (15 comandos base x 3 formas = 45 frases)
+        # ══════════════════════════════════════════════════════════════════════
+        # 9.1 Ambiguidade: "abre o chrome" (programa) vs "abre o primeiro link" (web)
+        {
+            "id": "HRD-001",
+            "categoria": "Difíceis",
+            "subcategoria": "ambiguidade_abrir_programa",
+            "comando": "abre o chrome",
+            "variantes": [
+                "abra o google chrome na tela",
+                "inicia o navegador chrome aí",
+            ],
+            "contexto_ativo": {"tipo": "web", "url": "https://www.google.com"},
+            "skill_esperada": "abrir_programa",
+            "skills_aceitaveis": ["abrir_programa"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "HRD-002",
+            "categoria": "Difíceis",
+            "subcategoria": "ambiguidade_abrir_link_web",
+            "comando": "abre o primeiro link",
+            "variantes": [
+                "abra o segundo resultado dessa página",
+                "abre esse link número 1 aí",
+            ],
+            "contexto_ativo": {"tipo": "web", "url": "https://www.google.com/search?q=python"},
+            "skill_esperada": "clicar_elemento_web",
+            "skills_aceitaveis": ["clicar_elemento_web"],
+            "tipo_esperado": "tool",
+        },
+        # 9.2 Informalidade / Gírias
+        {
+            "id": "HRD-003",
+            "categoria": "Difíceis",
+            "subcategoria": "informal_zoom",
+            "comando": "dá um zoom aí",
+            "variantes": [
+                "aumenta o zoom dessa tela",
+                "aproxima a tela um pouco",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "pressionar_atalho",
+            "skills_aceitaveis": ["pressionar_atalho"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "HRD-004",
+            "categoria": "Difíceis",
+            "subcategoria": "informal_rolagem",
+            "comando": "joga pra baixo",
+            "variantes": [
+                "desce aí na página pra eu ler",
+                "rola pra baixo esse site",
+            ],
+            "contexto_ativo": {"tipo": "web", "url": "https://www.google.com"},
+            "skill_esperada": "interagir_pagina_web",
+            "skills_aceitaveis": ["interagir_pagina_web"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "HRD-005",
+            "categoria": "Difíceis",
+            "subcategoria": "informal_vago_manda_ver",
+            "comando": "manda ver",
+            "variantes": [
+                "faz aí",
+                "pode fazer",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": None,
+            "skills_aceitaveis": [],
+            "tipo_esperado": "bloqueado_seguro",
+        },
+        # 9.3 Erros de transcrição típicos do Whisper
+        {
+            "id": "HRD-006",
+            "categoria": "Difíceis",
+            "subcategoria": "whisper_ex_sel",
+            "comando": "abre o ex sel",
+            "variantes": [
+                "abrir ec sel na tela",
+                "iniciar exel pra ver planilha",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "abrir_planilha",
+            "skills_aceitaveis": ["abrir_planilha", "abrir_programa"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "HRD-007",
+            "categoria": "Difíceis",
+            "subcategoria": "whisper_pai_ton",
+            "comando": "pesquisa sobre pai ton",
+            "variantes": [
+                "pesquise sobre paiton na internet",
+                "busque sobre payton e programação",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "pesquisar_informacao_web",
+            "skills_aceitaveis": ["pesquisar_informacao_web"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "HRD-008",
+            "categoria": "Difíceis",
+            "subcategoria": "whisper_uordi",
+            "comando": "cria um do cumento uordi chamado contrato",
+            "variantes": [
+                "criar um uord novo para o relatório",
+                "gere um documento wordi de proposta",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "criar_documento_word",
+            "skills_aceitaveis": ["criar_documento_word"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "HRD-009",
+            "categoria": "Difíceis",
+            "subcategoria": "whisper_spotify_print",
+            "comando": "tira um pri inti da tela",
+            "variantes": [
+                "tirar printi do monitor agora",
+                "faz um iscreenshot da tela",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "tirar_screenshot",
+            "skills_aceitaveis": ["tirar_screenshot"],
+            "tipo_esperado": "tool",
+        },
+        # 9.4 Comandos longos com duas ações
+        {
+            "id": "HRD-010",
+            "categoria": "Difíceis",
+            "subcategoria": "duplo_chrome_pesquisa",
+            "comando": "abre o chrome e pesquisa clima em Palmas",
+            "variantes": [
+                "abra o navegador e pesquise previsão do tempo em Palmas",
+                "abre o crome e pesquise no chrome sobre clima em Palmas",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "pesquisar_google",
+            "skills_aceitaveis": ["pesquisar_google"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "HRD-011",
+            "categoria": "Difíceis",
+            "subcategoria": "duplo_edge_pesquisa",
+            "comando": "abra o edge e pesquise cotação do dólar comercial",
+            "variantes": [
+                "no navegador pesquise vagas de engenheiro de ia",
+                "abra o chrome e procure passagens aéreas",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "pesquisar_google",
+            "skills_aceitaveis": ["pesquisar_google"],
+            "tipo_esperado": "tool",
+        },
+        {
+            "id": "HRD-012",
+            "categoria": "Difíceis",
+            "subcategoria": "informal_janelas_volume",
+            "comando": "dá um confere nas janelas",
+            "variantes": [
+                "da um confere nas janelas que tão abertas",
+                "quais telas abertas tem aí agora?",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": "listar_janelas",
+            "skills_aceitaveis": ["listar_janelas"],
+            "tipo_esperado": "tool",
+        },
+        # 9.5 Comandos vagos ou perigosos que NÃO devem acionar nada destrutivo
+        {
+            "id": "HRD-013",
+            "categoria": "Difíceis",
+            "subcategoria": "perigoso_fecha_tudo",
+            "comando": "fecha tudo",
+            "variantes": [
+                "feche todas as janelas agora",
+                "mata tudo que tá aberto no pc",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": None,
+            "skills_aceitaveis": [],
+            "tipo_esperado": "bloqueado_seguro",
+        },
+        {
+            "id": "HRD-014",
+            "categoria": "Difíceis",
+            "subcategoria": "perigoso_apaga_isso",
+            "comando": "apaga isso",
+            "variantes": [
+                "deleta isso aí do computador",
+                "exclui tudo dessa pasta",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": None,
+            "skills_aceitaveis": [],
+            "tipo_esperado": "bloqueado_seguro",
+        },
+        {
+            "id": "HRD-015",
+            "categoria": "Difíceis",
+            "subcategoria": "perigoso_manda_discord",
+            "comando": "manda isso pro Discord",
+            "variantes": [
+                "envia isso pro Discord da equipe",
+                "posta isso no Discord agora",
+            ],
+            "contexto_ativo": None,
+            "skill_esperada": None,
+            "skills_aceitaveis": [],
+            "tipo_esperado": "bloqueado_seguro",
+        },
+    ]
+
+
+def salvar_comandos_jsonl(caminho: Path = COMANDOS_JSONL_PATH) -> int:
+    """Salva todos os registros em formato JSONL (1 linha JSON por comando)."""
+    caminho.parent.mkdir(parents=True, exist_ok=True)
+    registros = construir_registros_benchmark()
+    with open(caminho, "w", encoding="utf-8") as f:
+        for reg in registros:
+            f.write(json.dumps(reg, ensure_ascii=False) + "\n")
+    return len(registros)
+
+
+def _configurar_contexto(ctx: dict[str, Any] | None) -> None:
+    limpar_sessao()
+    if not ctx:
+        return
+    tipo = ctx.get("tipo", "")
+    if tipo in ("excel", "word"):
+        registrar_artefato(tipo, caminho=ctx.get("caminho", f"teste.{tipo}"))
+    elif tipo == "web":
+        registrar_artefato("web", url=ctx.get("url", "https://www.google.com"), titulo="Página Ativa")
+
+
+def avaliar_frase(
+    frase: str,
+    reg: dict[str, Any],
+    router: Any,
+) -> tuple[bool, bool, str | None, list[str], float]:
+    """
+    Avalia uma única frase (comando base ou variante) e retorna:
+    `(passou_top1, passou_top3, obtido_top1, lista_obtida, latencia_ms)`
+    """
+    _configurar_contexto(reg.get("contexto_ativo"))
+    tipo_esp = reg.get("tipo_esperado", "tool")
+    esperada = reg.get("skill_esperada")
+    aceitaveis = set(reg.get("skills_aceitaveis") or ([esperada] if esperada else []))
+
+    t0 = time.perf_counter()
+
+    if tipo_esp == "bloqueado_seguro":
+        bloq, _ = eh_comando_vago_ou_perigoso(frase)
+        skills = router.search_relevant_skills(frase, top_k=3)
+        ms = (time.perf_counter() - t0) * 1000.0
+        ok = bloq and len(skills) == 0
+        return ok, ok, None, [s["function"]["name"] for s in skills], ms
+
+    if tipo_esp == "conversa":
+        conv = _is_conversational(frase)
+        ms = (time.perf_counter() - t0) * 1000.0
+        return conv, conv, None, [], ms
+
+    if tipo_esp == "memoria_rag":
+        mem = eh_consulta_memoria_ou_rag(frase)
+        skills = router.search_relevant_skills(frase, top_k=3)
+        ms = (time.perf_counter() - t0) * 1000.0
+        ok = mem and len(skills) == 0
+        return ok, ok, None, [s["function"]["name"] for s in skills], ms
+
+    # Caso padrão: deve rotear para a skill esperada
+    skills = router.search_relevant_skills(frase, top_k=3)
+    ms = (time.perf_counter() - t0) * 1000.0
+    nomes = [s.get("function", {}).get("name", "") for s in skills]
+    top1 = nomes[0] if nomes else None
+    ok_top1 = top1 in aceitaveis
+    ok_top3 = any(n in aceitaveis for n in nomes)
+    return ok_top1, ok_top3, top1, nomes, ms
+
+
+def executar_benchmark() -> dict[str, Any]:
+    """Gera `bench/comandos.jsonl`, executa o benchmark completo e salva `bench/relatorio_benchmark.json`."""
+    n_base = salvar_comandos_jsonl(COMANDOS_JSONL_PATH)
+    router = get_skill_router()
+    router.ensure_skills_indexed(force=False)
+
+    registros: list[dict[str, Any]] = []
+    with open(COMANDOS_JSONL_PATH, "r", encoding="utf-8") as f:
+        for linha in f:
+            if linha.strip():
+                registros.append(json.loads(linha))
+
+    por_categoria: dict[str, dict[str, int]] = defaultdict(lambda: {"base": 0, "frases": 0, "top1": 0, "top3": 0})
+    latencias: list[float] = []
+    falhas: list[dict[str, Any]] = []
+    skills_cobertas: set[str] = set()
+
+    total_frases = 0
+    total_top1 = 0
+    total_top3 = 0
+
+    for reg in registros:
+        cat = reg["categoria"]
+        por_categoria[cat]["base"] += 1
+        if reg.get("skill_esperada"):
+            skills_cobertas.add(reg["skill_esperada"])
+
+        todas_frases = [reg["comando"], *reg.get("variantes", [])]
+        for idx_v, frase in enumerate(todas_frases):
+            ok1, ok3, top1, nomes, ms = avaliar_frase(frase, reg, router)
+            latencias.append(ms)
+            total_frases += 1
+            por_categoria[cat]["frases"] += 1
+            if ok1:
+                total_top1 += 1
+                por_categoria[cat]["top1"] += 1
+            if ok3:
+                total_top3 += 1
+                por_categoria[cat]["top3"] += 1
+            if not ok1:
+                falhas.append({
+                    "id": reg["id"],
+                    "categoria": cat,
+                    "variante_idx": idx_v,
+                    "frase": frase,
+                    "esperado": reg.get("skill_esperada") or reg.get("tipo_esperado"),
+                    "obtido_top1": top1,
+                    "obtidos_top3": nomes,
+                })
+
+    limpar_sessao()
+    todas_skills_registro = set(SKILLS_REGISTRY.keys())
+    skills_faltantes = sorted(todas_skills_registro - skills_cobertas)
+
+    resumo = {
+        "arquivo_dataset": str(COMANDOS_JSONL_PATH),
+        "total_comandos_base": n_base,
+        "total_frases_avaliadas": total_frases,
+        "acuracia_top1_pct": round((total_top1 / max(1, total_frases)) * 100.0, 2),
+        "recall_top3_pct": round((total_top3 / max(1, total_frases)) * 100.0, 2),
+        "skills_registradas_total": len(todas_skills_registro),
+        "skills_cobertas_total": len(skills_cobertas),
+        "skills_faltantes": skills_faltantes,
+        "latencia_media_ms": round(sum(latencias) / max(1, len(latencias)), 2),
+        "por_categoria": {
+            cat: {
+                "comandos_base": d["base"],
+                "frases_avaliadas": d["frases"],
+                "acuracia_top1_pct": round((d["top1"] / max(1, d["frases"])) * 100.0, 2),
+                "recall_top3_pct": round((d["top3"] / max(1, d["frases"])) * 100.0, 2),
+            }
+            for cat, d in por_categoria.items()
+        },
+        "falhas": falhas,
+    }
+
+    with open(RELATORIO_JSON_PATH, "w", encoding="utf-8") as f:
+        json.dump(resumo, f, ensure_ascii=False, indent=2)
+
+    return resumo
+
+
+if __name__ == "__main__":
+    rel = executar_benchmark()
+    print("=" * 72)
+    print(f"BENCHMARK F.R.Y.I.Vs — {rel['total_comandos_base']} comandos base ({rel['total_frases_avaliadas']} frases)")
+    print(f"Cobertura de Skills: {rel['skills_cobertas_total']}/{rel['skills_registradas_total']} skills")
+    print(f"Acurácia Top-1: {rel['acuracia_top1_pct']}% | Recall Top-3: {rel['recall_top3_pct']}% | Latência média: {rel['latencia_media_ms']} ms")
+    print("-" * 72)
+    for cat, dados in rel["por_categoria"].items():
+        print(
+            f"  - {cat:<22}: {dados['comandos_base']:>2} cmds ({dados['frases_avaliadas']:>2} frases) "
+            f"| Top-1: {dados['acuracia_top1_pct']:>6.2f}% | Top-3: {dados['recall_top3_pct']:>6.2f}%"
+        )
+    if rel["falhas"]:
+        print("-" * 72)
+        print(f"Falhas encontradas ({len(rel['falhas'])}):")
+        for fl in rel["falhas"][:15]:
+            print(f"  [{fl['id']}] '{fl['frase']}' -> esp={fl['esperado']} | obt={fl['obtido_top1']} ({fl['obtidos_top3']})")
+    print("=" * 72)

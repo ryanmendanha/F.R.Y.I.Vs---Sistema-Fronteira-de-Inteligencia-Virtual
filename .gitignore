@@ -1,0 +1,58 @@
+# Segredos, Certificados e Variáveis de Ambiente
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.pfx
+credentials*.json
+client_secret*.json
+
+# Ambientes Virtuais e Dependências
+venv/
+.venv/
+env/
+node_modules/
+
+# Caches e Compilações
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+GPTCache/
+.coverage
+htmlcov/
+
+# Mídias e Arquivos Gerados
+audio_cache/
+vozes_resposta/
+screenshots/
+*.mp3
+*.mp3.tmp_*
+*.tmp_*
+*.wav
+*.docx
+*.xlsx
+~$*
+序y*
+MSO*.acl
+
+# Bancos de Dados Locais, Estado de Sessão e Dados de Usuário
+fryvis_memory/
+test_db_a/
+test_db_b/
+FRYIVS_TESTES/
+awesome_skills/
+planilhas-fryivs/
+documentos/
+data/gptcache_fryivs.db
+data/gptcache_map.txt
+data/overlay_state.json
+data/scheduled_jobs.json
+
+# Repositórios clonados, subprojetos externos e grafos gerados
+repositorios-github/
+VoiceStudio/
+graphify-out/
+.agents/
