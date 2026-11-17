@@ -37,8 +37,8 @@ from openwakeword.model import Model
 from openwakeword.utils import AudioFeatures
 
 SAMPLE_RATE = 16000
-STEP_SAMPLES = 1280  # 80ms por frame no openWakeWord
-WINDOW_FRAMES = 16   # 16 frames x 96 features = ~1.28s de contexto acústico
+STEP_SAMPLES = 1280
+WINDOW_FRAMES = 16
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 VOZ_M4A_PATH = ROOT_DIR / "voz-capta" / "voz.m4a"
@@ -55,7 +55,7 @@ def float_to_int16(audio: np.ndarray) -> np.ndarray:
 
 def extrair_segmentos_voz_m4a(audio: np.ndarray) -> list[np.ndarray]:
     """Segmenta as 5 elocuções reais do arquivo voz-capta/voz.m4a."""
-    chunk_len = 1600  # 100ms
+    chunk_len = 1600
     limiar = 0.025
     segmentos: list[np.ndarray] = []
     atual: list[np.ndarray] = []
@@ -163,7 +163,7 @@ def extrair_janelas_streaming(
         i = step_idx * STEP_SAMPLES
         preprocessor(pcm16[i : i + STEP_SAMPLES])
         if step_idx >= total_steps - ultimos_k_frames:
-            feat = preprocessor.get_features(WINDOW_FRAMES)  # shape (1, 16, 96)
+            feat = preprocessor.get_features(WINDOW_FRAMES)
             janelas.append(feat[0].astype(np.float32).copy())
     return janelas
 
@@ -244,8 +244,6 @@ def treinar_modelo_fryivs() -> dict[str, float]:
     pos_features: list[np.ndarray] = []
     neg_features: list[np.ndarray] = []
 
-    # 1. Extrai janelas positivas diretamente do streaming real sobre voz.m4a
-    # e de aumentações de cada um dos 5 segmentos reais da voz do usuário
     for seg in segmentos_reais:
         for stretch in (0.94, 1.0, 1.06):
             seg_st = _resample_stretch(seg, stretch)
@@ -256,7 +254,6 @@ def treinar_modelo_fryivs() -> dict[str, float]:
                 noise = rng.normal(0.0, 0.008, len(aug)).astype(np.float32)
                 pos_features.extend(extrair_janelas_streaming(preprocessor, aug + noise, ultimos_k_frames=3))
 
-    # 2. Gera variações sintéticas via edge-tts para reforçar a fonética ("Frives", "Fraives", "FRYIVS")
     frases_pos = ["Frives", "Fraives"]
     frases_neg = [
         "bom dia", "que horas são", "abra o navegador",
@@ -282,27 +279,24 @@ def treinar_modelo_fryivs() -> dict[str, float]:
     except Exception as exc:
         print(f"[Train OWW] Aviso TTS opcional: {exc}")
 
-    # 3. Negativos acústicos: silêncio, ruído branco, ruído de baixa frequência, cliques de microfone
     total_len = int(SAMPLE_RATE * 1.6)
     for amp in (0.0, 0.002, 0.008, 0.02, 0.05, 0.12):
         for _ in range(5):
             ruido = rng.normal(0.0, amp, total_len).astype(np.float32)
             neg_features.extend(extrair_janelas_streaming(preprocessor, ruido, ultimos_k_frames=4))
 
-    # Cliques / pops transitórios de microfone no início ou meio do buffer
     for _ in range(12):
         pop = rng.normal(0.0, 0.004, total_len).astype(np.float32)
         pos_pop = int(rng.integers(200, total_len - 1600))
         pop[pos_pop : pos_pop + int(rng.integers(80, 800))] += rng.uniform(-0.35, 0.35)
         neg_features.extend(extrair_janelas_streaming(preprocessor, pop, ultimos_k_frames=3))
 
-    # Pedaços truncados muito curtos (< 200ms) para evitar disparo antes da palavra terminar
     for seg in segmentos_reais:
         curto = seg[: min(len(seg) // 3, 2400)]
         neg_features.extend(extrair_janelas_streaming(preprocessor, _pad_ou_centralizar_clip(curto, offset_tail=2560), ultimos_k_frames=2))
 
-    X_pos = np.stack(pos_features, axis=0)  # (N_pos, 16, 96)
-    X_neg = np.stack(neg_features, axis=0)  # (N_neg, 16, 96)
+    X_pos = np.stack(pos_features, axis=0)
+    X_neg = np.stack(neg_features, axis=0)
     X = np.concatenate([X_pos, X_neg], axis=0)
     y = np.array([1] * len(X_pos) + [0] * len(X_neg), dtype=np.int64)
 
@@ -324,7 +318,6 @@ def treinar_modelo_fryivs() -> dict[str, float]:
     exportar_mlp_para_onnx(scaler, mlp, ONNX_OUT_PATH)
     print(f"[Train OWW] Modelo ONNX salvo em: {ONNX_OUT_PATH}")
 
-    # Treina e salva também o verificador customizado compatível com openwakeword.custom_verifier_model
     clf_lr = LogisticRegression(random_state=42, max_iter=2000, C=0.01)
     verifier_pipe = make_pipeline(FunctionTransformer(flatten_features), StandardScaler(), clf_lr)
     verifier_pipe.fit(X, y)
@@ -332,7 +325,6 @@ def treinar_modelo_fryivs() -> dict[str, float]:
         pickle.dump(verifier_pipe, f)
     print(f"[Train OWW] Verificador customizado salvo em: {VERIFIER_OUT_PATH}")
 
-    # Validação real com `openwakeword.Model` sobre os 5 segmentos de voz-capta/voz.m4a
     oww = Model(wakeword_models=[str(ONNX_OUT_PATH)], inference_framework="onnx")
     scores_reais: list[float] = []
     for i, seg in enumerate(segmentos_reais):
@@ -350,7 +342,6 @@ def treinar_modelo_fryivs() -> dict[str, float]:
         scores_reais.append(max_score)
         print(f"  -> Segmento real {i + 1}/5 de voz.m4a: max_score = {max_score:.4f}")
 
-    # Validação em ruído puro
     oww.reset()
     ruido_teste = float_to_int16(rng.normal(0.0, 0.02, SAMPLE_RATE * 2).astype(np.float32))
     max_ruido = 0.0

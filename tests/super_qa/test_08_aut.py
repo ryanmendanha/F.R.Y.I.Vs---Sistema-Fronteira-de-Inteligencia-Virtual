@@ -25,20 +25,15 @@ def sb(name: str) -> str:
     return str(SANDBOX / name)
 
 
-# ── AUT-001 ──────────────────────────────────────────────────────────────────
 def test_AUT_001_pipeline_pasta_planilha():
     """AUT-001: Pipeline completo: Criar pasta → Gerar planilha dentro → Validar."""
-    # Etapa 1: Criar pasta
     r1 = gerenciar_arquivos("criar_pasta", sb("pipeline_01"))
     assert Path(sb("pipeline_01")).exists(), f"Etapa 1 falhou: {r1}"
-    # Etapa 2: Criar planilha dentro da pasta
     r2 = criar_planilha(sb("pipeline_01/dados.xlsx"), abrir_no_excel=False)
     assert Path(sb("pipeline_01/dados.xlsx")).exists(), f"Etapa 2 falhou: {r2}"
-    # Etapa 3: Validar
     assert "criada" in r2.lower() or "sucesso" in r2.lower(), f"Validação falhou: {r2}"
 
 
-# ── AUT-002 ──────────────────────────────────────────────────────────────────
 def test_AUT_002_pipeline_pasta_word():
     """AUT-002: Pipeline completo: Criar pasta → Gerar documento Word → Validar."""
     gerenciar_arquivos("criar_pasta", sb("pipeline_02"))
@@ -50,16 +45,12 @@ def test_AUT_002_pipeline_pasta_word():
     assert Path(sb("pipeline_02/relatorio.docx")).exists(), f"Pipeline Word falhou: {r}"
 
 
-# ── AUT-003 ──────────────────────────────────────────────────────────────────
 def test_AUT_003_pipeline_planilha_para_word():
     """AUT-003: Pipeline: Gerar planilha → Ler dados → Gerar Word com resumo."""
-    # Etapa 1: Criar planilha com dados
     dados = [{"Produto": f"Prod_{i}", "Vendas": i * 100} for i in range(1, 6)]
     criar_planilha(sb("pipeline_03/vendas.xlsx"), dados=dados, abrir_no_excel=False)
-    # Etapa 2: Ler dados da planilha
     resumo = consultar_planilha(sb("pipeline_03/vendas.xlsx"), acao="resumo")
     assert isinstance(resumo, str)
-    # Etapa 3: Criar Word com o resumo
     r = criar_documento_word(
         sb("pipeline_03/relatorio_vendas.docx"),
         titulo="Relatório de Vendas AUT-003",
@@ -68,12 +59,10 @@ def test_AUT_003_pipeline_planilha_para_word():
     assert Path(sb("pipeline_03/relatorio_vendas.docx")).exists(), f"Etapa Word falhou: {r}"
 
 
-# ── AUT-004 ──────────────────────────────────────────────────────────────────
 def test_AUT_004_pipeline_screenshot_mover():
     """AUT-004: Pipeline: Capturar screenshot → Mover para pasta de auditoria."""
     result_ss = tirar_screenshot()
     assert isinstance(result_ss, str)
-    # Extrai caminho do resultado (heurística)
     caminho_ss = None
     for palavra in result_ss.split():
         for ext in [".png", ".jpg"]:
@@ -86,11 +75,9 @@ def test_AUT_004_pipeline_screenshot_mover():
         r = gerenciar_arquivos("mover", caminho_ss, destino)
         assert isinstance(r, str)
     else:
-        # Screenshot sem caminho explícito — aceitar
         assert isinstance(result_ss, str)
 
 
-# ── AUT-005 ──────────────────────────────────────────────────────────────────
 def test_AUT_005_pipeline_timestamp_log():
     """AUT-005: Pipeline: Obter timestamp → Criar arquivo de log com ele."""
     hora = obter_hora_data()
@@ -102,7 +89,6 @@ def test_AUT_005_pipeline_timestamp_log():
     assert "AUT-005" in log_path.read_text(encoding="utf-8")
 
 
-# ── AUT-006 ──────────────────────────────────────────────────────────────────
 def test_AUT_006_pipeline_status_para_planilha():
     """AUT-006: Pipeline: Consultar status CPU/RAM → Salvar leitura em planilha."""
     status = status_sistema()
@@ -112,35 +98,31 @@ def test_AUT_006_pipeline_status_para_planilha():
     assert Path(sb("monitoramento.xlsx")).exists(), f"Planilha de status falhou: {r}"
 
 
-# ── AUT-007 ──────────────────────────────────────────────────────────────────
 def test_AUT_007_condicional_criar_se_nao_existe():
     """AUT-007: Criar pasta somente se não existir — idempotente."""
     pasta = sb("condicional")
     r1 = gerenciar_arquivos("criar_pasta", pasta)
-    r2 = gerenciar_arquivos("criar_pasta", pasta)  # segunda chamada — deve funcionar (exist_ok=True)
+    r2 = gerenciar_arquivos("criar_pasta", pasta)
     assert Path(pasta).exists()
     assert isinstance(r1, str) and isinstance(r2, str)
 
 
-# ── AUT-008 ──────────────────────────────────────────────────────────────────
 def test_AUT_008_abortar_pipeline_em_falha():
     """AUT-008: Se etapa 1 falhar (caminho inválido), etapas seguintes não são executadas."""
     etapa1_ok = False
     try:
         r1 = gerenciar_arquivos("copiar", sb("nao_existe_origem.txt"), sb("destino_nao_deve.txt"))
         if "não encontrad" in r1.lower() or "nao encontrad" in r1.lower():
-            etapa1_ok = False  # Falhou conforme esperado
+            etapa1_ok = False
         else:
             etapa1_ok = True
     except Exception:
         etapa1_ok = False
 
     if not etapa1_ok:
-        # Etapas seguintes NÃO devem ser executadas
         assert not Path(sb("destino_nao_deve.txt")).exists(), "Arquivo não deveria existir após falha"
 
 
-# ── AUT-009 ──────────────────────────────────────────────────────────────────
 def test_AUT_009_lote_5_arquivos():
     """AUT-009: Criar 5 arquivos em lote e copiar todos para subpasta."""
     origem_dir = Path(sb("lote_origem"))
@@ -153,7 +135,6 @@ def test_AUT_009_lote_5_arquivos():
     assert len(arquivos) == 5, f"Esperado 5 arquivos no lote, obtido {len(arquivos)}: {r}"
 
 
-# ── AUT-010 ──────────────────────────────────────────────────────────────────
 def test_AUT_010_agendar_execucao():
     """AUT-010: Agendar execução e obter retorno de confirmação."""
     resultado = execute_skill("agendar_execucao", {
@@ -164,14 +145,12 @@ def test_AUT_010_agendar_execucao():
     assert isinstance(resultado, str)
 
 
-# ── AUT-011 ──────────────────────────────────────────────────────────────────
 def test_AUT_011_listar_agendamentos():
     """AUT-011: Listar agendamentos e verificar retorno estruturado."""
     resultado = execute_skill("listar_agendamentos")
     assert isinstance(resultado, str)
 
 
-# ── AUT-012 ──────────────────────────────────────────────────────────────────
 def test_AUT_012_automacao_desktop_notepad():
     """AUT-012: Abrir Bloco de Notas → Aguardar → Fechar."""
     from skills.open_app import abrir_programa
@@ -183,7 +162,6 @@ def test_AUT_012_automacao_desktop_notepad():
     assert isinstance(r_close, str)
 
 
-# ── AUT-013 ──────────────────────────────────────────────────────────────────
 def test_AUT_013_automacao_web_completa():
     """AUT-013: Abrir navegador → Capturar screenshot → Fechar."""
     from skills.web_automation import navegar_para, capturar_tela_web, fechar_navegador
@@ -198,7 +176,6 @@ def test_AUT_013_automacao_web_completa():
     fechar_navegador()
 
 
-# ── AUT-014 ──────────────────────────────────────────────────────────────────
 def test_AUT_014_limpeza_arquivos_temporarios():
     """AUT-014: Criar arquivos temporários e excluí-los em seguida."""
     temp_dir = Path(sb("temp_cleanup"))
@@ -210,17 +187,13 @@ def test_AUT_014_limpeza_arquivos_temporarios():
     assert not temp_dir.exists(), f"Limpeza falhou: {r}"
 
 
-# ── AUT-015 ──────────────────────────────────────────────────────────────────
 def test_AUT_015_pipeline_relatorio_completo():
     """AUT-015: Pipeline completo de relatório executivo com todos os tipos de arquivo."""
     base = Path(sb("relatorio_executivo"))
     base.mkdir(parents=True, exist_ok=True)
-    # Planilha de dados
     dados = [{"Departamento": "TI", "Custo": 50000}, {"Departamento": "RH", "Custo": 30000}]
     criar_planilha(str(base / "custos.xlsx"), dados=dados, abrir_no_excel=False)
-    # Resumo da planilha
     resumo = consultar_planilha(str(base / "custos.xlsx"), acao="resumo")
-    # Documento Word executivo
     hora = obter_hora_data()
     criar_documento_word(
         str(base / "relatorio_final.docx"),
@@ -232,8 +205,6 @@ def test_AUT_015_pipeline_relatorio_completo():
     assert (base / "custos.xlsx").exists()
     assert (base / "relatorio_final.docx").exists()
 
-
-# ── AUT-016 a AUT-030: Pipelines Avançados ───────────────────────────────────
 
 def test_AUT_016_copiar_planilha_renomear():
     """AUT-016: Copiar planilha para nova versão."""
@@ -403,24 +374,18 @@ def test_AUT_030_pipeline_end_to_end_completo():
     """AUT-030: Pipeline end-to-end completo — todos os tipos de operação encadeados."""
     base = Path(sb("end_to_end"))
     base.mkdir(parents=True, exist_ok=True)
-    # 1. Coletar dados do sistema
     hora = obter_hora_data()
     status = status_sistema()
-    # 2. Criar planilha com dados
     dados = [{"Tipo": "Hora", "Valor": hora}, {"Tipo": "Status", "Valor": status[:100]}]
     criar_planilha(str(base / "dados_sistema.xlsx"), dados=dados, abrir_no_excel=False)
-    # 3. Ler resumo da planilha
     resumo = consultar_planilha(str(base / "dados_sistema.xlsx"), acao="resumo")
-    # 4. Criar documento Word com tudo
     criar_documento_word(
         str(base / "relatorio_end_to_end.docx"),
         titulo="Relatório End-to-End AUT-030",
         paragrafos=[f"Hora de geração: {hora}", f"Status: {status[:100]}", f"Planilha: {resumo}"]
     )
-    # 5. Fazer backup do documento
     gerenciar_arquivos("copiar", str(base / "relatorio_end_to_end.docx"),
                         str(base / "relatorio_end_to_end_backup.docx"))
-    # Verificar todos os arquivos
     assert (base / "dados_sistema.xlsx").exists()
     assert (base / "relatorio_end_to_end.docx").exists()
     assert (base / "relatorio_end_to_end_backup.docx").exists()

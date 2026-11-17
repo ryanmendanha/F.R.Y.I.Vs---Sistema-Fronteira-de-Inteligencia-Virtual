@@ -112,7 +112,6 @@ Error generating stack: `+e.message+`
         document.addEventListener("DOMContentLoaded", () => {
             gsap.registerPlugin(ScrollTrigger);
 
-            // --- ASCII Particle System Implementation ---
             const canvas = document.getElementById('particle-canvas');
             const ctx = canvas.getContext('2d');
 
@@ -165,7 +164,6 @@ Error generating stack: `+e.message+`
             function draw() {
                 ctx.clearRect(0, 0, width, height);
 
-                // 1. Upward Beams (Fast)
                 beams.forEach(b => {
                     b.y -= b.speed;
                     if (b.y + b.length < 0) {
@@ -183,12 +181,10 @@ Error generating stack: `+e.message+`
                     ctx.stroke();
                 });
 
-                // 2. Interactive Nodes (ASCII)
                 ctx.font = '12px monospace';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 
-                // Proximity Lines
                 ctx.lineWidth = 0.5;
                 for(let i = 0; i < nodes.length; i++) {
                     let n1 = nodes[i];
@@ -214,10 +210,8 @@ Error generating stack: `+e.message+`
 
                     let dist = Math.hypot(mouse.x - n.x, mouse.y - n.y);
 
-                    // Dynamic Character Swap
                     if (dist < 180 || Math.random() > 0.98) n.char = chars[Math.floor(Math.random() * chars.length)];
 
-                    // Mouse Connection
                     if (dist < 180) {
                         ctx.strokeStyle = \`rgba(96, 165, 250, \${0.5 * (1 - dist/180)})\`;
                         ctx.beginPath(); 
@@ -234,10 +228,8 @@ Error generating stack: `+e.message+`
             }
             draw();
 
-            // --- GSAP Timeline Reveals ---
             const heading = document.getElementById('hero-heading');
             
-            // Staggered vertical masked word setup
             const words = heading.innerHTML.trim().split(/(<br\\s*\\/?>|\\s+)/).filter(w => w.trim().length > 0 || w.toLowerCase().includes('<br'));
             let newHTML = '';
             words.forEach(word => {
@@ -274,10 +266,8 @@ Error generating stack: `+e.message+`
                 ease: "power3.out"
             }, 0.6);
 
-            // Canvas Timeline Integration
             tl.to(canvas, { opacity: 1, duration: 2, ease: "power2.inOut" }, 0.2);
 
-            // Floating Logic independent 3D shifts
             gsap.to('#floating-card', {
                 y: "-=12",
                 rotationX: 4,

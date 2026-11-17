@@ -89,7 +89,6 @@ class OverlayBar:
         else:
             self._hud_img_id = None
 
-        # Pílula inferior de telemetria/status em tempo real sobre o Chrome/Edge
         self.status_id = c.create_text(
             cx,
             H - 12,

@@ -18,9 +18,7 @@ OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
 def normalizar_chave(texto: str) -> str:
     """Normaliza texto: lowercase, remove acentos e pontuação, colapsa espaços."""
     t = texto.lower().strip()
-    # Remove pontuação
     t = re.sub(r"[^\w\s]", "", t)
-    # Remove acentos
     t = "".join(c for c in unicodedata.normalize("NFD", t) if unicodedata.category(c) != "Mn")
     return " ".join(t.split())
 
@@ -52,13 +50,11 @@ def main():
 
     print(f"[Gerador] {len(pares)} perguntas a codificar. Calculando embeddings...")
 
-    # Usa o modelo padrão ONNX do ChromaDB (384 dimensões, rápido e local)
     default_ef = ef.DefaultEmbeddingFunction()
     textos = [item["pergunta"] for item in pares]
     raw_embeddings = default_ef(textos)
 
     embs = np.array(raw_embeddings, dtype=np.float32)
-    # Normalizar para norma unitária (para produto escalar = cosseno)
     norms = np.linalg.norm(embs, axis=1, keepdims=True)
     embs = embs / (norms + 1e-9)
 

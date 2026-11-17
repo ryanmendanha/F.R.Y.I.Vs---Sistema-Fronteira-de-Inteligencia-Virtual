@@ -14,16 +14,13 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 from typing import Tuple
 import numpy as np
 
-# ── Configurações de gravação ────────────────────────────────────────────────
-SAMPLE_RATE: int = 16000          # Hz requerido pelo Whisper
-VAD_SILENCE_THRESHOLD: float = 0.02   # Limiar RMS de silêncio (mais alto = ignora mais ruído)
-VAD_SILENCE_DURATION: float = 0.65    # Segundos de silêncio contínuo p/ parar (evita corte prematuro de pausas na fala)
-VAD_MIN_DURATION: float = 0.8         # Duração mínima de captura
-VAD_MAX_DURATION: float = 15.0        # Limite de segurança máximo em segundos
-CHUNK_SIZE: int = 1600                # Amostras por chunk (~100ms a 16kHz)
+SAMPLE_RATE: int = 16000
+VAD_SILENCE_THRESHOLD: float = 0.02
+VAD_SILENCE_DURATION: float = 0.65
+VAD_MIN_DURATION: float = 0.8
+VAD_MAX_DURATION: float = 15.0
+CHUNK_SIZE: int = 1600
 
-# Prompt inicial neutro em português (NÃO incluir o nome/wake-word aqui para evitar
-# que o Whisper alucine "Frives/FRYIVS" ao receber ruído de fundo ou clique de microfone).
 WHISPER_INITIAL_PROMPT = (
     "Comandos de voz em português brasileiro para automação de computador, "
     "planilhas Excel, documentos Word e navegação na internet."
@@ -54,7 +51,6 @@ def eh_alucinacao_whisper(texto: str) -> bool:
 
     joined = " ".join(tokens)
 
-    # 1. Vazamento do initial_prompt do Whisper ou de legendas de treinamento
     frases_alucinadas = (
         "comandos de voz em portugues brasileiro para automacao",
         "planilhas excel documentos word e navegacao na internet",
@@ -73,7 +69,6 @@ def eh_alucinacao_whisper(texto: str) -> bool:
     if any(f in joined for f in frases_alucinadas):
         return True
 
-    # 2. Loop de repetição da mesma palavra >= 3 vezes seguidas (ex: 'genios genios genios')
     streak = 1
     for i in range(1, len(tokens)):
         if tokens[i] == tokens[i - 1]:
@@ -83,12 +78,10 @@ def eh_alucinacao_whisper(texto: str) -> bool:
         else:
             streak = 1
 
-    # 3. Baixíssima diversidade vocabular em frases médias/longas (ex: 'frives fraives frives fraives...')
     if len(tokens) >= 5:
         unicos = set(tokens)
         if len(unicos) <= 2:
             return True
-        # Se uma única palavra domina mais de 60% dos tokens numa frase de >= 5 palavras
         from collections import Counter
         mais_comum, qtd = Counter(tokens).most_common(1)[0]
         if qtd >= 4 and (qtd / len(tokens)) >= 0.60:
@@ -96,11 +89,10 @@ def eh_alucinacao_whisper(texto: str) -> bool:
 
     return False
 
-# ── Singletons do modelo Whisper ─────────────────────────────────────────────
 import threading as _threading
 _whisper_model = None
 _whisper_models: dict[str, object] = {}
-_whisper_lock = _threading.Lock()  # evita instanciação concorrente (double-checked locking)
+_whisper_lock = _threading.Lock()
 
 
 def _get_whisper_model(model_name: str | None = None):
@@ -109,14 +101,12 @@ def _get_whisper_model(model_name: str | None = None):
     resolved = (model_name or os.getenv("WHISPER_MODEL", "small")).strip() or "small"
     default_name = (os.getenv("WHISPER_MODEL", "small").strip() or "small")
 
-    # Fast-path sem lock (leitura de cache já preenchido)
     if model_name is None and _whisper_model is not None:
         return _whisper_model
     if model_name is not None and resolved in _whisper_models:
         return _whisper_models[resolved]
 
     with _whisper_lock:
-        # Double-checked: outra thread pode ter preenchido enquanto esperávamos
         if model_name is None and _whisper_model is not None:
             return _whisper_model
         if model_name is not None and resolved in _whisper_models:
@@ -146,26 +136,24 @@ def _rms(chunk: np.ndarray) -> float:
 
 def _trim_silence(audio: np.ndarray, fs: int, threshold: float = 0.01) -> np.ndarray:
     """Remove silêncio do início e fim do áudio para transcrição mais limpa."""
-    chunk_len = int(fs * 0.05)  # chunks de 50ms para análise
+    chunk_len = int(fs * 0.05)
     if len(audio) < chunk_len:
         return audio
 
-    # Encontra o início da fala
     start = 0
     for i in range(0, len(audio) - chunk_len, chunk_len):
         if _rms(audio[i:i + chunk_len]) > threshold:
-            start = max(0, i - chunk_len)  # mantém 50ms antes da fala
+            start = max(0, i - chunk_len)
             break
 
-    # Encontra o fim da fala
     end = len(audio)
     for i in range(len(audio) - chunk_len, start, -chunk_len):
         if _rms(audio[i:i + chunk_len]) > threshold:
-            end = min(len(audio), i + chunk_len * 5)  # mantém ~250ms após a fala para preservar finais de palavras
+            end = min(len(audio), i + chunk_len * 5)
             break
 
     trimmed = audio[start:end]
-    if len(trimmed) < fs * 0.3:  # mínimo 300ms de áudio
+    if len(trimmed) < fs * 0.3:
         return audio
     return trimmed
 
@@ -182,8 +170,6 @@ def gravar_audio(duracao: int = 5, fs: int = SAMPLE_RATE) -> Tuple[np.ndarray, i
         Tuple (audio_array_float32, sample_rate)
     """
     try:
-        # Se o VoiceDaemon estiver ativo com o microfone aberto, delega para ele
-        # para evitar conflito de stream exclusivo no Windows.
         try:
             from core import voice_daemon
             if voice_daemon.ativo() and voice_daemon.stream_aberto():
@@ -204,7 +190,7 @@ def gravar_audio(duracao: int = 5, fs: int = SAMPLE_RATE) -> Tuple[np.ndarray, i
         silence_limit = int(VAD_SILENCE_DURATION * chunks_per_second)
         max_chunks = int(max_duration * chunks_per_second)
 
-        speech_started = False  # Flag para ignorar silêncio inicial
+        speech_started = False
 
         with sd.InputStream(samplerate=fs, channels=1, dtype="float32",
                             blocksize=CHUNK_SIZE) as stream:
@@ -218,11 +204,10 @@ def gravar_audio(duracao: int = 5, fs: int = SAMPLE_RATE) -> Tuple[np.ndarray, i
 
                 if energy > VAD_SILENCE_THRESHOLD:
                     speech_started = True
-                    silence_chunks = 0  # reset contador de silêncio
+                    silence_chunks = 0
                 elif speech_started:
                     silence_chunks += 1
 
-                # Para assim que detectar silêncio pós-fala (E respeitou o mínimo)
                 if (speech_started
                         and silence_chunks >= silence_limit
                         and elapsed_chunks >= min_chunks):
@@ -235,7 +220,6 @@ def gravar_audio(duracao: int = 5, fs: int = SAMPLE_RATE) -> Tuple[np.ndarray, i
 
         audio = np.concatenate(collected_chunks)
 
-        # Remove silêncio desnecessário do início/fim para transcrição mais precisa
         audio = _trim_silence(audio, fs, threshold=VAD_SILENCE_THRESHOLD * 0.8)
 
         duration_sec = len(audio) / fs
@@ -273,7 +257,6 @@ def transcrever(
         if isinstance(audio_data, np.ndarray) and len(audio_data) == 0:
             return ""
 
-        # Normaliza o áudio para [-1.0, 1.0] se necessário
         max_val = np.max(np.abs(audio_data))
         if max_val > 1.0:
             audio_data = audio_data / max_val

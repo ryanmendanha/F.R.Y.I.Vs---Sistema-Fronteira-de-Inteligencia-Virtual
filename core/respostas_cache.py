@@ -62,7 +62,6 @@ def carregar_cache(forcar_recarga: bool = False) -> dict[str, Any] | None:
             if itens:
                 embs = [item["embedding"] for item in itens]
                 arr = np.array(embs, dtype=np.float32)
-                # Garante norma unitária
                 norms = np.linalg.norm(arr, axis=1, keepdims=True)
                 _EMBEDDINGS_ARRAY = arr / (norms + 1e-9)
             else:
@@ -84,7 +83,6 @@ def eh_consulta_dinamica_ou_comando(texto_norm: str) -> bool:
     if not texto_norm:
         return False
 
-    # 1. Consulta dinâmica de hora e data (deve executar a skill obter_hora_data)
     padroes_hora_data = [
         r"\bque horas?\b",
         r"\bque dia\b",
@@ -106,7 +104,6 @@ def eh_consulta_dinamica_ou_comando(texto_norm: str) -> bool:
         if re.search(p, texto_norm):
             return True
 
-    # 2. Consulta dinâmica de status, desempenho, bateria, CPU e cotação
     padroes_status = [
         r"\bcomo esta a cpu\b",
         r"\buso de (?:cpu|memoria|disco|ram)\b",
@@ -125,7 +122,6 @@ def eh_consulta_dinamica_ou_comando(texto_norm: str) -> bool:
         if re.search(p, texto_norm):
             return True
 
-    # 3. Comandos com verbos de ação imperativos diretos (devem ir para o roteador de skills)
     palavras = texto_norm.split()
     if palavras and palavras[0] in {
         "abra", "abre", "feche", "fecha", "minimize", "minimiza", "maximize", "maximiza",
@@ -142,8 +138,6 @@ def eh_consulta_dinamica_ou_comando(texto_norm: str) -> bool:
     }:
         return True
 
-    # 4. Pedidos educados ("pode abrir a calculadora", "pode fazer uma planilha no excel de despesas")
-    # que especificam um alvo/complemento além das perguntas genéricas de capacidade
     if re.search(
         r"^(?:pode|poderia|consegue|tem como) (?:me )?(?:abrir|fechar|criar|fazer|gerar|montar|editar|"
         r"adicionar|remover|pesquisar|buscar|procurar|tocar|tirar|capturar|listar|mostrar|ler|escrever|"
@@ -182,7 +176,6 @@ def buscar_resposta_cache(
     t_limpo = re.sub(prefixos, "", texto_norm).strip()
     t_limpo = re.sub(sufixos, "", t_limpo).strip()
 
-    # Proteção estrita: nunca interceptar comandos de ação ou consultas dinâmicas de sistema/tempo
     if eh_consulta_dinamica_ou_comando(texto_norm) or (t_limpo and eh_consulta_dinamica_ou_comando(t_limpo)):
         return None
 
@@ -190,7 +183,6 @@ def buscar_resposta_cache(
     if not dados:
         return None
 
-    # 1. Casamento exato por dicionário
     lookup_exato = dados.get("lookup_exato", {})
     if texto_norm in lookup_exato:
         return {
@@ -210,7 +202,6 @@ def buscar_resposta_cache(
             "pergunta_referencia": t_limpo,
         }
 
-    # 2. Busca semântica por similaridade de cosseno
     if _EMBEDDINGS_ARRAY is None or len(_EMBEDDINGS_ARRAY) == 0:
         return None
 
@@ -222,7 +213,6 @@ def buscar_resposta_cache(
         if norm_q > 0:
             q_arr = q_arr / norm_q
 
-        # Produto interno = cosseno (vetores pré-normalizados)
         sims = _EMBEDDINGS_ARRAY @ q_arr
         best_idx = int(np.argmax(sims))
         best_score = float(sims[best_idx])

@@ -22,7 +22,6 @@ BASE_CONHECIMENTO_PATH: Path = (
 
 COLECAO_NOME: str = "fryvis_base_conhecimento"
 
-# Manifesto de hashes SHA-256 para detectar mudanças de conteúdo
 _MANIFEST_PATH: Path = _RAIZ_FRYIVS / "data" / "kb_manifest.json"
 
 
@@ -151,7 +150,6 @@ def indexar(forcar: bool = False, verbose: bool = True) -> int:
     if not arquivos:
         if verbose:
             print(f"[KnowledgeBase] Nenhum arquivo encontrado em {BASE_CONHECIMENTO_PATH}")
-        # Reconciliar fontes removidas mesmo quando a base ficou vazia
         if BASE_CONHECIMENTO_PATH.exists() and manifesto:
             colecao = _get_colecao()
             for rel_str_removido in list(manifesto.keys()):
@@ -178,14 +176,11 @@ def indexar(forcar: bool = False, verbose: bool = True) -> int:
         except Exception as e:
             if verbose:
                 print(f"[KnowledgeBase] Erro ao ler {arq}: {e}")
-            # Erro de leitura NÃO significa remover chunks existentes
             continue
 
-        # Calcula SHA-256 do conteúdo para detectar mudanças reais
         sha256_atual = hashlib.sha256(texto.encode("utf-8")).hexdigest()
         arquivos_processados.add(rel_str)
 
-        # Pular se conteúdo idêntico e não forçado
         if not forcar and manifesto.get(rel_str) == sha256_atual:
             continue
 
@@ -219,7 +214,6 @@ def indexar(forcar: bool = False, verbose: bool = True) -> int:
             manifesto_atualizado[rel_str] = sha256_atual
             continue
 
-        # Se o arquivo mudou de conteúdo, remove chunks antigos da fonte antes de reinserir
         if rel_str in manifesto and manifesto[rel_str] != sha256_atual:
             try:
                 resultado_antigo = colecao.get(where={"arquivo": rel_str}, include=[])
@@ -239,8 +233,6 @@ def indexar(forcar: bool = False, verbose: bool = True) -> int:
         if verbose:
             print(f"[KnowledgeBase] OK {rel_str} -- {novos_nesta} chunk(s)")
 
-    # Reconciliar fontes removidas (apenas se a varredura completou sem erro fatal)
-    # NÃO apaga chunks se a pasta estava inacessível
     if BASE_CONHECIMENTO_PATH.exists():
         fontes_removidas = set(manifesto.keys()) - arquivos_processados
         for rel_str_removido in fontes_removidas:

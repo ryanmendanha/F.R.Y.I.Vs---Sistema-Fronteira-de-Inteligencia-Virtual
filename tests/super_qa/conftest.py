@@ -9,7 +9,6 @@ import shutil
 from pathlib import Path
 import pytest
 
-# ── Raiz do projeto e sandbox ────────────────────────────────────────────────
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 SANDBOX = PROJECT_ROOT / "FRYIVS_TESTES"
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -20,7 +19,6 @@ def prepare_sandbox():
     """Cria a sandbox antes de todos os testes e preserva evidências ao final."""
     SANDBOX.mkdir(parents=True, exist_ok=True)
     yield
-    # Sandbox preservada para auditoria de evidências
 
 
 @pytest.fixture

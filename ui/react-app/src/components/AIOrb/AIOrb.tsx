@@ -1,12 +1,3 @@
-/**
- * AIOrb.tsx — Componente principal do orbe holográfico da IA F.R.Y.I.Vs
- *
- * Suporta dois modelos visuais intercambiáveis:
- *   "orbital-hud"      → Novo: esfera densa + anéis orbitais HUD segmentados (default)
- *   "neural-fibonacci"  → Clássico: anel Fibonacci em partículas com shaders GLSL originais
- *
- * A troca de modelo destrói e recria o contexto Three.js completo de forma limpa.
- */
 
 import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
@@ -17,9 +8,6 @@ import { orbVertexShader, orbFragmentShader } from "./orbShaders";
 import { createOrbitalHUDScene, DEFAULT_HUD_CONFIG } from "./OrbitalHUDVisual";
 import type { AIOrbProps, AIOrbConfig } from "./types";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CONFIGURAÇÃO PADRÃO — Modelo Neural Fibonacci (original)
-// ─────────────────────────────────────────────────────────────────────────────
 export const DEFAULT_ORB_CONFIG: AIOrbConfig = {
   particleCount:       10000,
   particleCountMobile: 5000,
@@ -64,9 +52,6 @@ export const DEFAULT_ORB_CONFIG: AIOrbConfig = {
   },
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Componente React
-// ─────────────────────────────────────────────────────────────────────────────
 export const AIOrb: React.FC<AIOrbProps> = ({
   model     = "orbital-hud",
   state     = "idle",
@@ -77,13 +62,11 @@ export const AIOrb: React.FC<AIOrbProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Mantém valores atuais acessíveis dentro do loop sem re-montar
   const statePropsRef = useRef({ state, audioLevel });
   useEffect(() => {
     statePropsRef.current = { state, audioLevel };
   }, [state, audioLevel]);
 
-  // Re-cria o motor 3D sempre que `model` mudar
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -103,9 +86,6 @@ export const AIOrb: React.FC<AIOrbProps> = ({
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
 
-    // ──────────────────────────────────────────────────────────────────
-    // MODO: ORBITAL HUD (novo visual — padrão)
-    // ──────────────────────────────────────────────────────────────────
     if (model === "orbital-hud") {
       const mergedCfg: AIOrbConfig = {
         ...DEFAULT_HUD_CONFIG,
@@ -138,9 +118,6 @@ export const AIOrb: React.FC<AIOrbProps> = ({
       };
     }
 
-    // ──────────────────────────────────────────────────────────────────
-    // MODO: NEURAL FIBONACCI (modelo clássico original — personalizável)
-    // ──────────────────────────────────────────────────────────────────
     const cfg: AIOrbConfig = {
       ...DEFAULT_ORB_CONFIG,
       ...(orbConfig ?? {}),
@@ -183,7 +160,6 @@ export const AIOrb: React.FC<AIOrbProps> = ({
     );
     composer.addPass(bloomPass);
 
-    // Geometria Fibonacci
     const geometry  = new THREE.BufferGeometry();
     const positions2 = new Float32Array(particleTotal * 3);
     const randoms   = new Float32Array(particleTotal);
@@ -238,7 +214,6 @@ export const AIOrb: React.FC<AIOrbProps> = ({
     const points = new THREE.Points(geometry, material);
     scene.add(points);
 
-    // Estado animado com lerp (mantido do original)
     const animStateRef = {
       currentRotSpeed:      cfg.rotationSpeed.idle,
       currentNoiseSpeed:    cfg.noiseSpeed.idle,

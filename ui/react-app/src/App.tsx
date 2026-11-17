@@ -46,13 +46,10 @@ export default function App() {
   const [showDemoToolbar, setShowDemoToolbar] = useState(true);
   const [chatOpen, setChatOpen] = useState(true);
 
-  // ── Wake Word — declarado aqui para evitar TDZ nos useEffects abaixo ──
   const [wakeWordActive, setWakeWordActive] = useState(true);
 
-  // ── Estado de Mute do microfone e saída de voz ──────────────────────
   const [micMuted, setMicMuted] = useState<boolean>(false);
 
-  // ── Modelo Visual do Orbe (persistido) ──────────────────────────────
   const [orbModel, setOrbModel] = useState<AIOrbModel>(() => {
     try {
       return (localStorage.getItem("fryvis_orb_model") as AIOrbModel) || "orbital-hud";
@@ -66,12 +63,10 @@ export default function App() {
     try { localStorage.setItem("fryvis_orb_model", m); } catch {}
   };
 
-  // ── Modo Administrador ───────────────────────────────────────────────
   const [isAdmin, setIsAdmin] = useState<boolean>(() => {
     try { return sessionStorage.getItem("fryvis_admin_unlocked") === "true"; } catch { return false; }
   });
 
-  // ── Seletor de Motor LLM (Gemini Principal / Ollama Secundário / Híbrido) ──
   const [engineProvider, setEngineProvider] = useState<string>(() => {
     try { return localStorage.getItem("fryvis_engine_provider") || "gemini"; } catch { return "gemini"; }
   });
@@ -120,7 +115,6 @@ export default function App() {
     }
   ];
 
-  // ── Seletor de Modelo LLM ────────────────────────────────────────────
   const [modelProfile, setModelProfile] = useState<string>(() => {
     try { return localStorage.getItem("fryvis_model_profile") || "fryvis_1.0"; } catch { return "fryvis_1.0"; }
   });
@@ -225,7 +219,6 @@ export default function App() {
       .catch((err) => console.error(err));
   }, []);
 
-  // ── WebSocket com reconexão automática e backoff exponencial ────────
   const wsRef = useRef<WebSocket | null>(null);
   const wsReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wsReconnectDelay = useRef<number>(1000);
@@ -249,7 +242,6 @@ export default function App() {
       ws.onclose = () => {
         setWsConnected(false);
         wsRef.current = null;
-        // Backoff exponencial: 1s → 2s → 4s → 8s → 16s → 30s (máx)
         const delay = wsReconnectDelay.current;
         wsReconnectDelay.current = Math.min(delay * 2, 30000);
         wsReconnectTimerRef.current = setTimeout(connectWs, delay);
@@ -366,7 +358,6 @@ export default function App() {
     }
     try { window.speechSynthesis.cancel(); } catch {}
 
-    // Timer de segurança infalível: impede que o estado fique preso em 'speaking' se o browser falhar
     const estimatedMs = Math.min(25000, Math.max(2500, cleaned.length * 85));
     const safetyTimer = setTimeout(() => {
       setAiState("idle");
@@ -383,7 +374,6 @@ export default function App() {
     const match = englishPattern.exec(cleaned);
     const speakUtterance = (chunk: string, lang: string, isLast: boolean) => {
       const u = new SpeechSynthesisUtterance(chunk);
-      // Previne Garbage Collection prematuro do V8 do Chrome/Edge
       (window as any).__fryvisActiveUtterance = u;
       u.lang = lang;
       u.rate = 1.05;
@@ -441,7 +431,6 @@ export default function App() {
     setAdminSuccess("");
   };
 
-  // ── Toggle Mute: bloqueia/desbloqueia microfone + voz ───────────────
   const toggleMicMute = async () => {
     const novoMute = !micMuted;
     setMicMuted(novoMute); // atualização otimista
@@ -500,7 +489,6 @@ export default function App() {
         const audioSrc = data.audio_url || `/api/audio/last?v=${Date.now()}`;
         audioRef.current.src = audioSrc;
 
-        // Timer de segurança contra travamentos em áudio (máximo 25s)
         const audioTimer = setTimeout(() => {
           setAiState("idle");
           setAudioLevel(0);
@@ -534,7 +522,6 @@ export default function App() {
     }
   };
 
-  // ── Wake Word "FRYIVS" gerenciada pelo VoiceDaemon no servidor Python ──
   const voiceAbortControllerRef = useRef<AbortController | null>(null);
 
   const pararEscutaComando = () => {
@@ -546,19 +533,15 @@ export default function App() {
     setAudioLevel(0);
   };
 
-  // ── Botão de parada: cancela comando ativo no servidor + áudio local ──
   const pararComandoAtivo = async () => {
     pararEscutaComando();
     try {
       await fetch("/api/commands/cancel", { method: "POST" });
     } catch {
-      // Falha silenciosa — o estado local já foi resetado
     }
   };
 
-
   const handleVoice = async () => {
-    // Quando estiver falando ou processando, a escuta NÃO deve ser habilitada
     if (aiState === "thinking" || aiState === "speaking") {
       return;
     }
@@ -567,11 +550,9 @@ export default function App() {
       return;
     }
     if (micMuted) {
-      // Se mudo, desmuta primeiro (o usuário chamou pelo botão principal)
       await toggleMicMute();
       return;
     }
-    // Aciona wake word manualmente ("Senhor?") sem abrir escuta livre
     try {
       await fetch("/api/voice/trigger", { method: "POST" });
     } catch {}
@@ -606,15 +587,12 @@ export default function App() {
     { id: "neural-fibonacci",  label: "Neural Fibonacci",   desc: "Clássico · Anel Fibonacci em partículas" },
   ];
 
-  /* Largura do chat sidebar para calcular margens no header */
   const chatSidebarWidth = chatOpen && !isFullScreenOrb ? 420 : 0;
-
 
   return (
     <div className="w-screen h-dvh flex overflow-hidden bg-black text-slate-200 font-sans selection:bg-blue-500/30">
       <audio ref={audioRef} className="hidden" preload="auto" />
 
-      {/* ── BACKGROUND: Partículas sutis ── */}
       <div className="fixed inset-0 z-0 pointer-events-none opacity-20 mix-blend-screen">
         <ParticleDrift
           mode="dark"
@@ -624,24 +602,17 @@ export default function App() {
         />
       </div>
 
-      {/* ════════════════════════════════════════════════════════════════
-          ÁREA CENTRAL — Orbe 3D holográfico em tela cheia
-          ════════════════════════════════════════════════════════════════ */}
       <div className="flex-1 min-w-0 relative flex flex-col items-center justify-center z-10 bg-black overflow-hidden">
-        {/* ── HEADER MINIMALISTA FLUTUANTE — adaptado para não colidir com o chat ── */}
         <header
           className="absolute top-0 left-0 z-30 flex items-center gap-2.5 px-4 py-2 pointer-events-none min-w-0"
           style={{ right: chatSidebarWidth }}
         >
-          {/* ── IDENTIDADE VISUAL — ícone puro + tipografia ── */}
           <div className="flex items-center gap-2.5 pointer-events-auto shrink-0 min-w-fit">
-            {/* Ícone PURO sem container/bolha — apenas PNG com glow neon */}
             <img
               src="/static/fryivs-icon-removebg-preview.png"
               alt="F.R.Y.I.Vs"
               className="w-9 h-9 object-contain shrink-0 drop-shadow-[0_0_10px_rgba(34,211,238,0.75)] hover:drop-shadow-[0_0_16px_rgba(34,211,238,0.9)] transition-all duration-300"
             />
-            {/* Tipografia da marca */}
             <div className="flex flex-col justify-center gap-[2px]">
               <h1 className="text-[14px] font-bold tracking-[0.3em] text-white leading-none drop-shadow-[0_0_8px_rgba(34,211,238,0.4)] tabular-nums whitespace-nowrap">
                 F.R.Y.I.Vs
@@ -652,9 +623,6 @@ export default function App() {
             </div>
           </div>
 
-
-
-          {/* ── SELETOR DE MOTOR IA (pills — shrink-0 para não cobrir o brand) ── */}
           <div className="hidden sm:flex items-center gap-1 p-1 rounded-full bg-black/55 border border-white/10 backdrop-blur-2xl shadow-[0_4px_20px_rgba(0,0,0,0.7)] pointer-events-auto shrink-0">
             {ENGINE_OPTIONS.map((eng) => {
               const isSelected = engineProvider === eng.id;
@@ -682,9 +650,7 @@ export default function App() {
             })}
           </div>
 
-          {/* ── GRUPO DE CONTROLES DIREITO ── */}
           <div className="flex items-center gap-1.5 pointer-events-auto shrink-0 ml-auto">
-            {/* Chip status WS + modelo fundidos */}
             <div ref={modelDropdownRef} className="relative z-30">
               <button
                 type="button"
@@ -744,7 +710,6 @@ export default function App() {
               )}
             </div>
 
-            {/* Seletor de Modelo Visual do Orbe */}
             <div className="flex items-center gap-0.5 p-0.5 rounded-full bg-black/55 border border-white/10 backdrop-blur-xl">
               {ORB_MODEL_OPTIONS.map((opt) => (
                 <button
@@ -763,10 +728,8 @@ export default function App() {
               ))}
             </div>
 
-            {/* Divisor */}
             <div className="w-px h-5 bg-white/10 mx-0.5" />
 
-            {/* Botão Admin */}
             <button
               onClick={() => { setAdminError(""); setAdminSuccess(""); setShowAdminModal(true); }}
               aria-label={isAdmin ? "Administrador Ativo" : "Acesso de Administrador"}
@@ -780,7 +743,6 @@ export default function App() {
               {isAdmin ? <Unlock size={13} className="text-amber-400" /> : <Lock size={13} />}
             </button>
 
-            {/* Toggle Chat */}
             <button
               onClick={() => setChatOpen((v) => !v)}
               aria-label={chatOpen ? "Ocultar Terminal de Diálogo" : "Mostrar Terminal de Diálogo"}
@@ -794,7 +756,6 @@ export default function App() {
               <MessageSquare size={13} />
             </button>
 
-            {/* Fullscreen */}
             <button
               onClick={() => setIsFullScreenOrb((v) => !v)}
               aria-label="Alternar tela cheia"
@@ -806,7 +767,6 @@ export default function App() {
           </div>
         </header>
 
-        {/* ── PÍLULA DE ESTADO DA IA ── */}
         <div className="absolute top-[72px] z-20 flex flex-col items-center pointer-events-none">
           <div className="px-5 py-1.5 rounded-full border border-white/8 bg-black/40 backdrop-blur-xl flex items-center gap-2.5 shadow-xl shadow-purple-500/5">
             <div className={`w-2 h-2 rounded-full ${stateDotColors[aiState]}`} />
@@ -816,7 +776,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* ── ORBE 3D ── */}
         <div className="w-full h-full flex items-center justify-center relative">
           <AIOrb
             model={orbModel}
@@ -826,10 +785,8 @@ export default function App() {
           />
         </div>
 
-        {/* ── CONTROLES DE VOZ (centro-inferior) ── */}
         <div className="absolute bottom-8 z-20 flex flex-col items-center gap-4">
           <div className="flex items-center gap-4">
-            {/* Botão de Mute — bloqueia microfone E voz */}
             <button
               onClick={toggleMicMute}
               title={micMuted ? "Microfone mudo — clique para reativar (desbloqueia entrada e saída de voz)" : "Mutar microfone e saída de voz"}
@@ -849,7 +806,6 @@ export default function App() {
               )}
             </button>
 
-            {/* Botão de parada — visível quando processando ou falando */}
             {(aiState === "thinking" || aiState === "speaking") && (
               <button
                 onClick={pararComandoAtivo}
@@ -886,7 +842,6 @@ export default function App() {
             </button>
           </div>
 
-          {/* Quick Skills Bar — apenas Admin */}
           {isAdmin && (
             <div className="flex gap-1.5 px-3 py-2 bg-black/60 backdrop-blur-2xl border border-white/8 rounded-2xl shadow-xl">
               {[
@@ -909,7 +864,6 @@ export default function App() {
           )}
         </div>
 
-        {/* ── DEMO TOOLBAR (Admin) ── */}
         {isAdmin && (
           <div className="absolute top-[72px] right-6 z-30 flex flex-col items-end gap-2">
             <button
@@ -959,9 +913,6 @@ export default function App() {
         )}
       </div>
 
-      {/* ════════════════════════════════════════════════════════════════
-          PAINEL LATERAL DE CHAT — Glassmorphism flutuante retrátil
-          ════════════════════════════════════════════════════════════════ */}
       <div
         className={`h-full z-20 flex flex-col border-l border-white/10 bg-[#040812]/85 backdrop-blur-3xl transition-all duration-500 ease-in-out overflow-hidden ${
           chatOpen && !isFullScreenOrb ? "w-[420px] opacity-100" : "w-0 opacity-0"
@@ -969,7 +920,6 @@ export default function App() {
       >
         {chatOpen && !isFullScreenOrb && (
           <div className="flex flex-col h-full p-5 min-w-[420px]">
-            {/* Header do Painel */}
             <div className="flex items-center justify-between mb-4 pb-2 border-b border-white/5">
               <div className="flex items-center gap-2">
                 <MessageSquare size={15} className="text-cyan-400" />
@@ -986,7 +936,6 @@ export default function App() {
               </button>
             </div>
 
-            {/* ── STATUS COMPACTO DO MOTOR ── */}
             {(() => {
               const activeEngine = ENGINE_OPTIONS.find(e => e.id === engineProvider) || ENGINE_OPTIONS[0];
               const EngIcon = activeEngine.icon;
@@ -1003,9 +952,7 @@ export default function App() {
               );
             })()}
 
-            {/* Status Strip */}
             <div className="flex gap-1.5 mb-3 text-[10px] font-mono flex-wrap">
-              {/* Badge Mic Mudo — visível quando sistema está silenciado */}
               {micMuted && (
                 <div className="flex items-center gap-1.5 bg-red-500/15 rounded-lg px-2.5 py-1.5 border border-red-400/35 shrink-0">
                   <MicOff size={10} className="text-red-400" />
@@ -1026,7 +973,6 @@ export default function App() {
               )}
             </div>
 
-            {/* ── MENSAGENS DO CHAT ── */}
             <div className="flex-1 overflow-y-auto pr-1 space-y-4 font-sans scrollbar-thin scrollbar-thumb-white/8 scrollbar-track-transparent">
               {messages.length === 0 && (
                 <div className="h-full flex flex-col items-center justify-center gap-3 text-slate-500 text-center px-6 py-8">
@@ -1043,7 +989,6 @@ export default function App() {
                 const isUser = msg.role === "user";
                 return (
                   <div key={i} className={`flex gap-2.5 ${isUser ? "flex-row-reverse" : "flex-row"} w-full`}>
-                    {/* Avatar */}
                     <div className={`shrink-0 size-7 rounded-full flex items-center justify-center mt-0.5 ${
                       isUser
                         ? "bg-gradient-to-br from-blue-600/40 to-cyan-600/30 border border-cyan-400/30"
@@ -1054,9 +999,7 @@ export default function App() {
                         : <Bot size={13} className="text-cyan-400" />
                       }
                     </div>
-                    {/* Bubble */}
                     <div className={`flex flex-col gap-1 max-w-[85%] ${isUser ? "items-end" : "items-start"}`}>
-                      {/* Header da mensagem */}
                       <div className={`flex items-center gap-1.5 text-[9px] font-mono ${isUser ? "flex-row-reverse" : "flex-row"}`}>
                         <span className={`font-bold tracking-wider ${isUser ? "text-cyan-400" : "text-blue-300"}`}>
                           {isUser ? "VOCÊ" : "F.R.Y.I.Vs"}
@@ -1064,7 +1007,6 @@ export default function App() {
                         <span className="text-slate-600">·</span>
                         <span className="text-slate-500 tabular-nums">{msg.time}</span>
                       </div>
-                      {/* Conteúdo da mensagem */}
                       <div
                         className={`px-3.5 py-2.5 text-[12.5px] leading-relaxed select-text ${
                           isUser
@@ -1075,7 +1017,6 @@ export default function App() {
                       >
                         <p className="text-pretty whitespace-pre-wrap">{msg.text}</p>
                       </div>
-                      {/* Tools executados (admin) */}
                       {isAdmin && msg.tools && msg.tools.map((t: any, j: number) => (
                         <div key={j} className="mt-1 text-[10px] font-mono bg-indigo-950/60 border border-indigo-400/30 text-indigo-200 px-3 py-2 rounded-xl max-w-full break-words">
                           <span className="text-cyan-300 font-bold">⚡ Executado:</span> <span className="text-white font-semibold">{t.tool}</span>
@@ -1089,7 +1030,6 @@ export default function App() {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* ── BARRA DE ENTRADA / INPUT CHAT ── */}
             <form
               onSubmit={handleSend}
               className="mt-3 flex items-end gap-2 p-1.5 pl-3 bg-[#060d1a]/90 border border-white/12 rounded-2xl focus-within:border-cyan-400/60 focus-within:shadow-[0_0_20px_rgba(34,211,238,0.25)] transition-all"
@@ -1134,9 +1074,6 @@ export default function App() {
         )}
       </div>
 
-      {/* ════════════════════════════════════════════════════════════════
-          MODAL DE ACESSO DO ADMINISTRADOR
-          ════════════════════════════════════════════════════════════════ */}
       {showAdminModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4">
           <div className="relative w-full max-w-md bg-zinc-950/95 border border-blue-500/25 rounded-2xl p-6 shadow-2xl shadow-blue-500/8 font-mono text-sm">

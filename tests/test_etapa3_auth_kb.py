@@ -14,10 +14,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 
-# ══════════════════════════════════════════════════════════════
-# Autenticação — _verificar_token
-# ══════════════════════════════════════════════════════════════
-
 class TestVerificarToken:
     """Testa a dependência _verificar_token do server.py."""
 
@@ -26,7 +22,6 @@ class TestVerificarToken:
         import importlib
         import server
         importlib.reload(server)
-        # Sobrescreve _API_TOKEN diretamente após reload
         server._API_TOKEN = token_env
         return server._verificar_token
 
@@ -36,7 +31,6 @@ class TestVerificarToken:
         original = server._API_TOKEN
         try:
             server._API_TOKEN = ""
-            # Não deve lançar exceção
             server._verificar_token(authorization="")
             server._verificar_token(authorization="Bearer qualquer_coisa")
             server._verificar_token(authorization="invalido")
@@ -49,7 +43,6 @@ class TestVerificarToken:
         original = server._API_TOKEN
         try:
             server._API_TOKEN = "meu_token_secreto_123"
-            # Não deve lançar exceção
             server._verificar_token(authorization="Bearer meu_token_secreto_123")
         finally:
             server._API_TOKEN = original
@@ -101,10 +94,6 @@ class TestVerificarToken:
         assert " == " not in src or "compare_digest" in src, "Não deve usar == para comparar tokens"
 
 
-# ══════════════════════════════════════════════════════════════
-# Knowledge Base — manifesto SHA-256
-# ══════════════════════════════════════════════════════════════
-
 class TestKBManifesto:
     """Testa o manifesto SHA-256 da knowledge_base."""
 
@@ -114,7 +103,6 @@ class TestKBManifesto:
         base = tmp_path / "base_conhecimento"
         base.mkdir()
         manifest_path = tmp_path / "data" / "kb_manifest.json"
-        # Patch dos caminhos
         return kb, base, manifest_path
 
     def test_ler_manifesto_arquivo_inexistente_retorna_vazio(self, tmp_path):
@@ -172,7 +160,6 @@ class TestKBManifesto:
             kb._salvar_manifesto(manifesto_inicial)
             total = kb.indexar(forcar=False, verbose=False)
 
-        # Não deve ter chamado upsert pois hash igual
         mock_colecao.upsert.assert_not_called()
         assert total == 0
 
@@ -187,12 +174,11 @@ class TestKBManifesto:
         base = tmp_path / "base_conhecimento"
         base.mkdir()
         arq = base / "doc.md"
-        arq.write_text(conteudo_novo, encoding="utf-8")  # arquivo já com conteúdo novo
+        arq.write_text(conteudo_novo, encoding="utf-8")
 
         manifest_path = tmp_path / "kb_manifest.json"
 
         mock_colecao = MagicMock()
-        # Simula chunks antigos existentes no ChromaDB
         mock_colecao.get.return_value = {"ids": ["chunk_antigo_1", "chunk_antigo_2"]}
         mock_colecao.count.return_value = 2
 
@@ -201,12 +187,10 @@ class TestKBManifesto:
             patch.object(kb, "_MANIFEST_PATH", manifest_path),
             patch.object(kb, "_get_colecao", new=lambda: mock_colecao),
         ):
-            kb._salvar_manifesto({"doc.md": sha_antigo})  # manifesto com hash antigo
+            kb._salvar_manifesto({"doc.md": sha_antigo})
             total = kb.indexar(forcar=False, verbose=False)
 
-        # Deve ter deletado os chunks antigos
         mock_colecao.delete.assert_called_once()
-        # Deve ter inserido os novos
         mock_colecao.upsert.assert_called_once()
         assert total > 0
 
@@ -232,10 +216,9 @@ class TestKBManifesto:
             patch.object(kb, "_MANIFEST_PATH", manifest_path),
             patch.object(kb, "_get_colecao", new=lambda: mock_colecao),
         ):
-            kb._salvar_manifesto({"doc.md": sha})  # mesmo hash
+            kb._salvar_manifesto({"doc.md": sha})
             total = kb.indexar(forcar=True, verbose=False)
 
-        # Com forcar=True, deve ter feito upsert mesmo com hash igual
         mock_colecao.upsert.assert_called()
         assert total > 0
 
@@ -251,7 +234,6 @@ class TestKBManifesto:
         manifest_path = tmp_path / "kb_manifest.json"
         mock_colecao = MagicMock()
 
-        # Simula erro de leitura
         def raise_on_read(*args, **kwargs):
             raise PermissionError("Sem permissão")
 
@@ -264,7 +246,6 @@ class TestKBManifesto:
             kb._salvar_manifesto({})
             kb.indexar(forcar=False, verbose=False)
 
-        # NÃO deve ter chamado delete
         mock_colecao.delete.assert_not_called()
 
     def test_indexar_reconcilia_fonte_removida(self, tmp_path):
@@ -273,7 +254,6 @@ class TestKBManifesto:
 
         base = tmp_path / "base_conhecimento"
         base.mkdir()
-        # Pasta existe mas arquivo removido
 
         manifest_path = tmp_path / "kb_manifest.json"
         mock_colecao = MagicMock()
@@ -285,11 +265,9 @@ class TestKBManifesto:
             patch.object(kb, "_MANIFEST_PATH", manifest_path),
             patch.object(kb, "_get_colecao", new=lambda: mock_colecao),
         ):
-            # Manifesto aponta para arquivo que não existe mais
             kb._salvar_manifesto({"arquivo_removido.md": "hash_antigo"})
             kb.indexar(forcar=False, verbose=False)
 
-        # Deve ter chamado delete para remover chunks órfãos
         mock_colecao.delete.assert_called()
 
     def test_manifesto_atualizado_apos_indexacao(self, tmp_path):

@@ -10,7 +10,6 @@ import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
-# Garante que o diretório raiz esteja no path
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
@@ -217,7 +216,6 @@ class TestServerChatEndpoint(unittest.TestCase):
                 {"role": "assistant", "content": "Resposta concisa, senhor."},
             ])
 
-        # Testa envio com provider='gemini'
         payload_gemini = {
             "message": "Teste gemini cloud",
             "provider": "gemini",
@@ -249,7 +247,6 @@ class TestServerAudioLastEndpoint(unittest.TestCase):
     @patch("os.path.exists", return_value=True)
     @patch("os.path.getsize", return_value=2048)
     def test_get_last_audio_success_returns_no_cache_headers(self, mock_size, mock_exists):
-        # Cria arquivo temporário real ou mock de FileResponse
         temp_audio = os.path.join(ROOT, "resposta.mp3")
         already_existed = os.path.exists(temp_audio)
         if not already_existed:

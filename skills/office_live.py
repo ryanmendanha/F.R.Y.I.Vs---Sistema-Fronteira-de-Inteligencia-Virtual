@@ -26,7 +26,6 @@ from typing import Any, Callable
 
 from core.overlay import status_overlay
 
-# Constantes Win32 para exibir janela sem ativar/roubar foco
 SW_SHOWNOACTIVATE = 4
 SW_SHOWNA = 8
 SW_RESTORE = 9
@@ -37,7 +36,7 @@ SWP_NOZORDER = 0x0004
 SWP_NOACTIVATE = 0x0010
 SWP_SHOWWINDOW = 0x0040
 
-RPC_E_CALL_REJECTED = -2147418111  # 0x80010001 (Office ocupado)
+RPC_E_CALL_REJECTED = -2147418111
 
 _sta_queue: "queue.Queue[tuple[Callable[..., Any], tuple[Any, ...], dict[str, Any], queue.Queue[ tuple[bool, Any] ]]]" = queue.Queue()
 _sta_thread: threading.Thread | None = None
@@ -113,7 +112,7 @@ def _sta_worker() -> None:
         import pythoncom
         pythoncom.CoInitialize()
     except Exception:
-        pythoncom = None  # type: ignore[assignment]
+        pythoncom = None
 
     try:
         while True:
@@ -163,8 +162,6 @@ def executar_sta(fn: Callable[..., Any], *args: Any, timeout: float = 25.0, **kw
         raise payload if isinstance(payload, Exception) else RuntimeError(str(payload))
     return payload
 
-
-# ── EXCEL AO VIVO ────────────────────────────────────────────────────────────
 
 def _obter_excel_app(criar_se_ausente: bool = True) -> Any:
     import win32com.client
@@ -277,7 +274,6 @@ def _estilizar_planilha_com(ws: Any, n_linhas: int, n_cols: int) -> None:
     if n_cols <= 0 or n_linhas <= 0:
         return
     try:
-        # Cabeçalho (linha 1): fundo azul marinho (#1F4E79 -> BGR 0x794E1F = 7949855)
         hdr = ws.Range(ws.Cells(1, 1), ws.Cells(1, n_cols))
         hdr.Interior.Color = 0x794E1F
         hdr.Font.Name = "Segoe UI"
@@ -324,7 +320,6 @@ def editar_planilha_live(
         ws = wb.ActiveSheet
         excel.ScreenUpdating = True
 
-        # Limpa conteúdo anterior e escreve cabeçalhos + linhas em bloco (rápido e visível ao vivo)
         ws.Cells.ClearContents()
         colunas = [str(c) for c in list(df_novo.columns)]
         n_cols = len(colunas)
@@ -341,7 +336,6 @@ def editar_planilha_live(
 
             _estilizar_planilha_com(ws, n_rows + 1, n_cols)
 
-            # Rola suavemente até a última linha editada
             try:
                 ultima = max(1, n_rows + 1)
                 ws.Cells(ultima, 1).Select()
@@ -364,8 +358,6 @@ def editar_planilha_live(
     except Exception as e:
         return False, str(e)
 
-
-# ── WORD AO VIVO ─────────────────────────────────────────────────────────────
 
 def _obter_word_app(criar_se_ausente: bool = True) -> Any:
     import win32com.client
@@ -488,7 +480,6 @@ def editar_documento_word_live(
 
         substituicoes = 0
         if substituir_de and substituir_para is not None:
-            # Conta ocorrências e aplica substituição direta nos parágrafos e tabelas
             for p in doc.Paragraphs:
                 txt = p.Range.Text
                 if substituir_de in txt:
@@ -498,7 +489,6 @@ def editar_documento_word_live(
             for tbl in doc.Tables:
                 for row in tbl.Rows:
                     for cell in row.Cells:
-                        # Remove marcador de fim de célula (\r\x07) ao manipular
                         raw = cell.Range.Text
                         corpo = raw[:-2] if raw.endswith("\r\x07") else raw
                         if substituir_de in corpo:
@@ -510,9 +500,7 @@ def editar_documento_word_live(
             p_tit = doc.Paragraphs.Add()
             p_tit.Range.Text = str(adicionar_titulo) + "\r"
             try:
-                # Usa o objeto retornado pelo Add() diretamente.
-                # doc.Paragraphs(Count - 1) era off-by-one (COM é 1-based e Add insere antes do marcador final)
-                p_tit.Style = -3  # wdStyleHeading2 = -3
+                p_tit.Style = -3
             except Exception:
                 pass
 
@@ -521,8 +509,7 @@ def editar_documento_word_live(
                 p_novo = doc.Paragraphs.Add()
                 p_novo.Range.Text = str(texto_p) + "\r"
                 try:
-                    # Usa objeto retornado pelo Add() diretamente (mesmo motivo do título)
-                    p_novo.Style = -1  # wdStyleNormal = -1
+                    p_novo.Style = -1
                 except Exception:
                     pass
 

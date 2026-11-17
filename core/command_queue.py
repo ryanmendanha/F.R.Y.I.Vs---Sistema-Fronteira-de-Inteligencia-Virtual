@@ -32,8 +32,6 @@ class CommandQueue:
                         return await asyncio.shield(task)
                     except asyncio.CancelledError:
                         command.cancelled.set()
-                        # Drain before admitting another command: executor threads cannot
-                        # be forcibly stopped by cancelling their asyncio waiter.
                         await asyncio.gather(task, return_exceptions=True)
                         raise
                 finally:
@@ -51,7 +49,6 @@ class CommandQueue:
     async def close(self):
         self.closed = True
         self.cancel()
-        # All admitted waiters precede this lock acquisition (FIFO asyncio lock).
         async with self.lock:
             pass
 

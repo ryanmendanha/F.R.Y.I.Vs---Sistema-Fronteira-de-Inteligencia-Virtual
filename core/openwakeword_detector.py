@@ -25,7 +25,7 @@ MODELS_DIR: Final[Path] = ROOT_DIR / "models" / "openwakeword"
 FRYIVS_ONNX_PATH: Final[Path] = MODELS_DIR / "fryivs.onnx"
 FRYIVS_VERIFIER_PATH: Final[Path] = MODELS_DIR / "fryivs_verifier.pkl"
 
-OWW_STEP_SAMPLES: Final[int] = 1280  # 80ms @ 16kHz
+OWW_STEP_SAMPLES: Final[int] = 1280
 DEFAULT_OWW_THRESHOLD: Final[float] = 0.55
 DEFAULT_VAD_THRESHOLD: Final[float] = 0.40
 
@@ -200,12 +200,11 @@ class OpenWakeWordDetector:
         if len(pcm_core) == 0:
             return False, 0.0
 
-        pad = np.zeros(8000, dtype=np.int16)  # 0.5s de padding p/ inicializar os 5 frames do OWW
+        pad = np.zeros(8000, dtype=np.int16)
         pcm = np.concatenate([pad, pcm_core, pad])
 
         with self._lock:
             self._oww_model.reset()
-            # Desabilita momentaneamente o filtro de janela defasada do Silero VAD em clipes isolados
             old_vad = getattr(self._oww_model, "vad_threshold", 0.0)
             self._oww_model.vad_threshold = 0.0
             max_score = 0.0

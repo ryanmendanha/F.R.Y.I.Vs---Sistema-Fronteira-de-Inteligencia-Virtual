@@ -26,8 +26,6 @@ except ImportError:
     requests = None
 
 
-# ── Thread Daemon de Agendamento ────────────────────────────────────────────
-
 _scheduler_running = False
 _scheduler_lock = threading.Lock()
 _jobs_registry: list[dict[str, Any]] = []
@@ -43,8 +41,6 @@ def _scheduler_loop() -> None:
                 print(f"[Scheduler] Erro ao executar tarefa agendada: {e}")
         time.sleep(1)
 
-
-# ── Persistência ─────────────────────────────────────────────────────────
 
 _JOBS_FILE = _Path(__file__).parent.parent / "data" / "scheduled_jobs.json"
 
@@ -86,8 +82,6 @@ def _garantir_scheduler_ativo() -> None:
             _scheduler_running = True
 
 
-# ── Schemas Pydantic ────────────────────────────────────────────────────────
-
 class AgendarExecucaoParams(BaseModel):
     horario: str = Field(
         ...,
@@ -115,8 +109,6 @@ class EnviarAlertaWebhookParams(BaseModel):
     )
 
 
-# ── Funções Executáveis ─────────────────────────────────────────────────────
-
 def agendar_execucao(horario: str, comando: str, tipo: str = "diario") -> str:
     """
     Agenda a execução periódica de uma rotina ou alerta no robô com a biblioteca schedule.
@@ -133,7 +125,6 @@ def agendar_execucao(horario: str, comando: str, tipo: str = "diario") -> str:
         def _tarefa() -> None:
             print(f"[Scheduler] Disparando tarefa agendada: {cmd}")
             try:
-                # Encaminha pelo pipeline autorizado (mesma rota do chat HTTP)
                 from core import assistant_pipeline as _pl
                 import asyncio as _asyncio
                 from core import voice_daemon as _vd
@@ -149,7 +140,6 @@ def agendar_execucao(horario: str, comando: str, tipo: str = "diario") -> str:
                         loop,
                     )
                 else:
-                    # Fallback: falar o lembrete sem executar ferramenta
                     from core.tts import falar as _falar
                     _falar(f"Lembrete: {cmd}")
             except Exception as _exc_t:
@@ -174,7 +164,6 @@ def agendar_execucao(horario: str, comando: str, tipo: str = "diario") -> str:
             _salvar_jobs()
             return f"Rotina agendada: executar '{cmd}' a cada {minutos} minutos."
 
-        # Agendamento diário em horário fixo HH:MM
         schedule.every().day.at(h).do(_tarefa)
         _jobs_registry.append(job_info)
         _salvar_jobs()
@@ -210,7 +199,6 @@ def enviar_alerta_webhook(
         )
 
     try:
-        # Detecta tipo de webhook pela URL e formata payload correto
         url_lower = url.lower()
         if "discord.com/api/webhooks" in url_lower:
             payload = {"content": mensagem, "username": "F.R.Y.I.Vs"}
@@ -232,8 +220,6 @@ def enviar_alerta_webhook(
     except Exception as e:
         return f"Falha ao enviar notificação externa via webhook: {e}"
 
-
-# ── Schemas OpenAPI ─────────────────────────────────────────────────────────
 
 SCHEDULER_SCHEMAS: Final[list[dict[str, Any]]] = [
     {

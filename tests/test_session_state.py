@@ -36,13 +36,11 @@ class TestSessionState:
             titulo="GitHub",
         )
 
-        # Artefato ativo mais recente é web
         ativo = session_state.obter_artefato()
         assert ativo is not None
         assert ativo["tipo"] == "web"
         assert ativo["url"] == "https://github.com"
 
-        # Consulta explícita por tipo retorna cada artefato preservado
         excel = session_state.obter_artefato("excel")
         assert excel is not None
         assert excel["caminho"] == "C:/temp/estoque.xlsx"

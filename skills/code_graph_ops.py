@@ -29,7 +29,6 @@ def _carregar_grafo() -> tuple[nx.Graph, dict[str, Any]]:
     global _CACHED_GRAPH, _CACHED_MTIME, _CACHED_DATA
 
     if not _GRAPH_JSON_PATH.exists():
-        # Tenta gerar o grafo inicial se não existir
         atualizar_mapa_codigo()
 
     if not _GRAPH_JSON_PATH.exists():
@@ -239,7 +238,6 @@ def resumo_arquitetura_sistema() -> str:
     num_nodes = G.number_of_nodes()
     num_edges = G.number_of_edges()
 
-    # Identificar God Nodes (nós com maior grau de conexão)
     graus = sorted(G.degree, key=lambda x: x[1], reverse=True)[:6]
     god_nodes_str = []
     for nid, d in graus:
@@ -247,7 +245,6 @@ def resumo_arquitetura_sistema() -> str:
         src = G.nodes[nid].get("source_file", "")
         god_nodes_str.append(f"  1. `{label}` ({d} conexões) — em `{src}`")
 
-    # Arquivos mapeados
     arquivos = set(attrs.get("source_file", "") for _, attrs in G.nodes(data=True) if attrs.get("source_file"))
 
     return (
@@ -279,7 +276,6 @@ def atualizar_mapa_codigo() -> str:
             text=True,
             timeout=120
         )
-        # Exporta também o HTML visualizador
         subprocess.run(
             [python_exe, "-m", "graphify", "export", "html"],
             cwd=str(_RAIZ_PROJETO),
@@ -296,10 +292,6 @@ def atualizar_mapa_codigo() -> str:
     except Exception as e:
         return f"Senhor, ocorreu uma falha ao atualizar o mapa do código: {e}"
 
-
-# ==============================================================================
-# Esquemas OpenAPI / JSON Schema para registro nas ferramentas da FRYIVS
-# ==============================================================================
 
 CODE_GRAPH_SCHEMAS: Final[list[dict[str, Any]]] = [
     {

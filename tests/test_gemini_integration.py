@@ -22,6 +22,6 @@ def call_chat(msg):
 if __name__ == "__main__":
     print("=== BATERIA DE TESTES DE INTEGRAÇÃO F.R.Y.I.Vs ===")
     call_chat("Quem é você?")
-    call_chat("Quem é você?")  # Teste de Cache
+    call_chat("Quem é você?")
     call_chat("Que horas são agora?")
     call_chat("Crie uma planilha de controle chamada despesas_mensais.xlsx")

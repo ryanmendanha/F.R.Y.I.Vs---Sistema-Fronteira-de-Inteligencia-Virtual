@@ -17,7 +17,6 @@ except ImportError:
     pyautogui = None
     gw = None
 
-# Configurações do PyAutoGUI (evita interrupção quando cursor do mouse está no canto)
 if pyautogui is not None:
     pyautogui.FAILSAFE = False
     pyautogui.PAUSE = 0.1
@@ -170,7 +169,6 @@ def digitar_texto(texto: str) -> str:
 def _parse_keys(teclas: list[str] | str) -> list[str]:
     """Auxiliar para converter atalhos em strings compostas ou listas normalizadas."""
     if isinstance(teclas, str):
-        # Permite 'ctrl+c', 'ctrl + c', 'ctrl, c'
         delimiters = ["+", ","]
         for d in delimiters:
             if d in teclas:
@@ -216,7 +214,6 @@ def controlar_volume(acao: str) -> str:
         else:
             return f"Ação de volume desconhecida: '{acao}'. Use 'aumentar', 'diminuir' ou 'mutar'."
     except Exception as e_pag:
-        # Fallback de emergência caso PyAutoGUI falhe em tempo de execução
         if os.name == "nt":
             try:
                 import ctypes
@@ -318,13 +315,11 @@ def tirar_screenshot(nome_arquivo: str | None = None) -> str:
         if pyautogui is None:
             return "Erro: A biblioteca 'pyautogui' não está instalada."
 
-        # 1. Tenta captura via PyAutoGUI (padrão)
         try:
             screenshot = pyautogui.screenshot()
             screenshot.save(caminho)
             return f"Captura de tela salva com sucesso em '{caminho}'."
         except Exception as e_pag:
-            # Fallback via captura nativa ultraestável do Windows via GDI se pyautogui falhar
             if os.name == "nt":
                 if _win32_native_screenshot(caminho):
                     return f"Captura de tela salva com sucesso em '{caminho}'."
@@ -387,7 +382,6 @@ def _abrir_url_navegador_visivel(url: str) -> None:
         import win32gui
         import win32con
 
-        # Destravar Foreground Lock do Windows simulando toque em Alt
         ctypes.windll.user32.keybd_event(0x12, 0, 0, 0)
         ctypes.windll.user32.keybd_event(0x12, 0, 2, 0)
 
@@ -448,7 +442,6 @@ def _abrir_navegador_segundo_plano(url: str, navegador: str = "chrome") -> str:
         cmd = [target_exe, "--new-window", url]
         if sys.platform == "win32":
             try:
-                # SW_SHOWNOACTIVATE = 4 (abre a janela sem torná-la ativa nem roubar o foco)
                 STARTF_USESHOWWINDOW = 0x1
                 SW_SHOWNOACTIVATE = 4
                 si = subprocess.STARTUPINFO()
@@ -504,13 +497,12 @@ def pesquisar_informacao_web(termo: str) -> str:
 
     resultados = []
     links_encontrados: list[dict[str, str]] = []
-    # 1. Busca rápida via DuckDuckGo (suporta ddgs e duckduckgo_search sem emitir RuntimeWarning)
     try:
         import warnings
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             try:
-                from ddgs import DDGS  # type: ignore[import-not-found]
+                from ddgs import DDGS
             except ImportError:
                 from duckduckgo_search import DDGS
             with DDGS(timeout=4) as ddgs:
@@ -538,7 +530,6 @@ def pesquisar_informacao_web(termo: str) -> str:
         except Exception:
             pass
 
-    # 2. Complementa com Wikipédia em português
     if not resultados or len(resultados) < 2:
         try:
             import urllib.request, urllib.parse, json
@@ -606,7 +597,6 @@ def bloquear_tela() -> str:
         return f"Erro ao bloquear a tela: {e}"
 
 
-# Esquemas padronizados para integração com LLM / Ollama
 SYSTEM_TOOLS_SCHEMAS: Final[list[dict[str, object]]] = [
     {
         "type": "function",

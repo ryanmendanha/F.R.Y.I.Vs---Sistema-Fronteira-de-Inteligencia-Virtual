@@ -5,7 +5,6 @@ from core.skill_router import get_skill_router
 router = get_skill_router()
 
 test_queries = [
-    # Caso B: Usuário NÃO pede para abrir navegador -> APENAS pesquisar e retornar no chat
     ("Pesquise sobre a teoria da relatividade", "pesquisar_informacao_web"),
     ("O que é inteligência artificial", "pesquisar_informacao_web"),
     ("Quem foi Alan Turing", "pesquisar_informacao_web"),
@@ -13,14 +12,12 @@ test_queries = [
     ("Procure sobre o telescópio James Webb", "pesquisar_informacao_web"),
     ("Busque informações sobre buracos negros", "pesquisar_informacao_web"),
 
-    # Caso A: Usuário PEDE para abrir Chrome/Edge -> Abre diretamente no navegador em segundo plano
     ("Abra o Chrome e pesquise sobre carros elétricos", "pesquisar_google"),
     ("Pesquise no Chrome sobre Python", "pesquisar_google"),
     ("Abra no Edge e pesquise notícias de tecnologia", "pesquisar_google"),
     ("Pesquise no Edge sobre cotação do euro", "pesquisar_google"),
     ("Abra o navegador e pesquise sobre IA", "pesquisar_google"),
 
-    # Casos de Abertura Simples (sem pesquisa)
     ("Abra o Chrome", "abrir_programa"),
     ("Abra o bloco de notas", "abrir_programa"),
 ]

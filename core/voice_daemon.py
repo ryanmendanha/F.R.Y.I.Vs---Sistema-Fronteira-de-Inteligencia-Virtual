@@ -35,9 +35,6 @@ from core.tts import AUDIO_CACHE_DIR, falar
 from core.wake_word import comando_util, contem_nome
 from core import mute_state as _mute_state
 
-# Prompt curto focado na grafia fonética da wake word; combinado com vad_filter=True,
-# warmup de inicialização e filtro estrito de no_speech_prob <= 0.45 em core/stt.py
-# para impedir qualquer alucinação em ruído ambiente ou clique de microfone.
 WAKE_PROMPT = "Frives, FRYIVS, Fraives."
 SENHOR_MP3_PATH = os.path.join(AUDIO_CACHE_DIR, "senhor_ack.mp3")
 
@@ -88,7 +85,6 @@ class VoiceDaemon:
         self._esta_tocando = tocando_fn or audio_player.tocando
         self._esta_processando = processando_fn or _mute_state.is_processing
 
-        # Integração com o motor neural openWakeWord (ONNX)
         if usar_openwakeword is None:
             usar_openwakeword = transcrever_wake_fn is None or oww_detector is not None
         self._usar_oww: bool = bool(usar_openwakeword)
@@ -98,7 +94,6 @@ class VoiceDaemon:
         self._oww_wake_no_segmento: bool = False
         self._oww_max_score_segmento: float = 0.0
 
-        # Buffers de segmento atual
         self._chunks_fala: list[np.ndarray] = []
         self._pre_roll: collections.deque[np.ndarray] = collections.deque(maxlen=3)
         self._fala_iniciada: bool = False
@@ -107,7 +102,6 @@ class VoiceDaemon:
         self._chunks_espera_pedido: int = 0
         self._warmup_restante: int = 0
 
-        # Ring buffer recente para compartilhamento seguro com gravar_audio legado
         self._ring_lock = threading.Lock()
         self._ring_chunks: collections.deque[np.ndarray] = collections.deque(maxlen=300)
 
@@ -116,31 +110,24 @@ class VoiceDaemon:
         self._stream_aberto = False
         self._thread: threading.Thread | None = None
 
-        # Half-duplex reforçado: cooldown de 400 ms após fim da reprodução (anti-eco)
         self._silenciar_ate: float = 0.0
         if _em_teste():
             _mute_state.reset_cooldown()
 
-        # Interrupção cooperativa por voz ("FRYIVS, pare")
-        # Acumula chunks durante reprodução para atingir duração mínima antes de transcrever
         self._stop_chunks: list = []
-        self._stop_chunk_limit: int = 8   # ≈ 800 ms de áudio (8 × 100 ms)
-        # Função de transcrição exclusiva para detecção de interrupção.
-        # Separada de _transcrever_wake para não poluir métricas de wake word
-        # e permitir substituição independente em testes.
+        self._stop_chunk_limit: int = 8
         self._transcrever_interrupcao = self._default_transcrever_wake
 
-        # Parâmetros em unidades de chunks de 100ms (1600 amostras @ 16kHz)
-        self.min_wake_chunks = 4          # 0.4s mínimo para wake word
-        self.min_voz_ativa_chunks = 3     # pelo menos 300ms de energia real acima do limiar
-        self.silencio_wake_chunks = 4     # 0.4s de silêncio encerra segmento de wake word
-        self.max_wake_chunks = 40         # 4.0s máximo para segmento de wake word
+        self.min_wake_chunks = 4
+        self.min_voz_ativa_chunks = 3
+        self.silencio_wake_chunks = 4
+        self.max_wake_chunks = 40
 
-        self.timeout_pedido_chunks = 80   # 8.0s esperando o usuário começar a falar após "Senhor?"
-        self.min_pedido_chunks = 5        # 0.5s mínimo de fala do comando
-        self.min_voz_ativa_pedido_chunks = 3  # pelo menos 300ms de energia acima do limiar no pedido
-        self.silencio_pedido_chunks = 8   # 0.8s de silêncio encerra captura do pedido
-        self.max_pedido_chunks = 150      # 15.0s máximo de pedido
+        self.timeout_pedido_chunks = 80
+        self.min_pedido_chunks = 5
+        self.min_voz_ativa_pedido_chunks = 3
+        self.silencio_pedido_chunks = 8
+        self.max_pedido_chunks = 150
 
     def _mudar_estado(self, novo: str) -> None:
         if self.estado != novo:
@@ -244,7 +231,6 @@ class VoiceDaemon:
             self._tocar_senhor()
         except Exception as e:
             print(f"[VoiceDaemon] Aviso ao tocar 'Senhor?': {e}")
-        # Aplica cooldown anti-eco de 450ms quando toca no hardware real (evita capturar eco do próprio 'Senhor?')
         if self._tocar_senhor == self._default_tocar_senhor and not _em_teste():
             self._silenciar_ate = time.time() + 0.45
         self._resetar_captura()
@@ -291,7 +277,6 @@ class VoiceDaemon:
         self._mudar_estado("DORMINDO")
         self._notificar({"type": "state_change", "state": "idle", "detail": "Aguardando 'FRYIVS'..."})
 
-    # Palavras que interrompem a fala da FRYIVS quando detectadas durante reprodução
     _STOP_WORDS: frozenset = frozenset({
         "pare", "para", "silencio", "silêncio", "chega",
         "stop", "cancela", "cancele", "basta",
@@ -309,7 +294,7 @@ class VoiceDaemon:
         try:
             audio_seg = np.concatenate(self._stop_chunks)
             if _rms(audio_seg) < max(self.limiar_rms, 0.04):
-                return  # silêncio — não transcrever
+                return
             texto = self._transcrever_interrupcao(audio_seg)
             if not texto:
                 return
@@ -336,7 +321,6 @@ class VoiceDaemon:
         if len(flat) == 0:
             return
 
-        # ── REGRA: QUANDO ESTIVER FALANDO OU PROCESSANDO, NÃO HABILITA A ESCUTA ──
         if not self.escuta_habilitada():
             self._resetar_captura()
             self._pre_roll.clear()
@@ -355,7 +339,6 @@ class VoiceDaemon:
 
         energia = _rms(flat)
 
-        # Período de estabilização inicial do microfone (ignora pop/estalo de abertura do driver)
         if self._warmup_restante > 0:
             self._warmup_restante -= 1
             if energia < 0.08:
@@ -366,7 +349,6 @@ class VoiceDaemon:
             self._pre_roll.clear()
             return
 
-        # Calibração adaptativa suave quando em silêncio no estado DORMINDO
         if self.estado == "DORMINDO" and not self._fala_iniciada and energia < self.limiar_rms:
             if len(self._ruido_amostras) < 40:
                 self._ruido_amostras.append(energia)
@@ -374,7 +356,6 @@ class VoiceDaemon:
                 self.limiar_rms = max(0.040, min(0.085, piso * 3.8))
 
         if self.estado == "DORMINDO":
-            # Estágio 1: Alimenta o motor neural openWakeWord continuamente em blocos de 80ms
             oww_ativou = False
             oww_score = 0.0
             if self._oww_detector is not None and self._oww_detector.disponivel:
@@ -398,7 +379,6 @@ class VoiceDaemon:
             else:
                 self._pre_roll.append(flat)
 
-            # Verifica se o segmento curto terminou
             if self._fala_iniciada and (
                 self._chunks_silencio >= self.silencio_wake_chunks
                 or len(self._chunks_fala) >= self.max_wake_chunks
@@ -410,11 +390,9 @@ class VoiceDaemon:
                 audio_seg = np.concatenate(self._chunks_fala)
                 self._resetar_captura()
 
-                # Descarta ruído curto (< min_wake_chunks ou poucos blocos acima do limiar)
                 if total_chunks < self.min_wake_chunks or voz_ativa < self.min_voz_ativa_chunks:
                     return
 
-                # Se openWakeWord está ativo e ainda não confirmou no streaming, avalia o segmento isolado
                 if (
                     not oww_confirmou
                     and self._oww_detector is not None
@@ -425,8 +403,6 @@ class VoiceDaemon:
                     if oww_seg_ok:
                         oww_confirmou = True
 
-                # Filtro acústico openWakeWord (Estágio 1): se o score acústico for baixo (< 0.25)
-                # em segmento curto, mantém o Whisper desligado
                 if (
                     self._oww_detector is not None
                     and self._oww_detector.disponivel
@@ -436,7 +412,6 @@ class VoiceDaemon:
                 ):
                     return
 
-                # Estágio 2: Confirmação fonética estrita ("FRYIVS / Fraives / Frives")
                 self._mudar_estado("VERIFICANDO")
                 texto = self._transcrever_wake(audio_seg)
                 if eh_alucinacao_whisper(texto):
@@ -460,7 +435,6 @@ class VoiceDaemon:
                     self._oww_detector.reset()
 
                 if comando_util(resto):
-                    # Nome + pedido na mesma frase: refina transcrição com modelo principal se necessário
                     texto_completo = self._transcrever_cmd(audio_seg) or texto
                     _, resto_refinado = contem_nome(texto_completo)
                     pedido_final = resto_refinado if comando_util(resto_refinado) else resto
@@ -501,7 +475,6 @@ class VoiceDaemon:
                 )
                 self._resetar_captura()
                 if voz_ativa_cmd < self.min_voz_ativa_pedido_chunks:
-                    # Ruído curto/clique no microfone durante OUVINDO_PEDIDO: ignora e volta a dormir sem alucinar
                     self._mudar_estado("DORMINDO")
                     status_overlay("", ativo=False)
                     self._notificar({"type": "state_change", "state": "idle", "detail": "Pronta"})
@@ -512,21 +485,17 @@ class VoiceDaemon:
                     status_overlay("", ativo=False)
                     self._notificar({"type": "state_change", "state": "idle", "detail": "Pronta"})
                     return
-                # Caso o usuário tenha repetido "Frives, ..." também no pedido, remove o prefixo
                 chamou_novamente, resto_cmd = contem_nome(texto_cmd)
                 if chamou_novamente:
                     if comando_util(resto_cmd):
                         texto_cmd = resto_cmd
                     else:
-                        # Usuário ou eco disse apenas 'Frives' de novo sem comando: ignora sem enloquecer
                         self._mudar_estado("DORMINDO")
                         status_overlay("", ativo=False)
                         self._notificar({"type": "state_change", "state": "idle", "detail": "Pronta"})
                         return
                 self._executar_pedido(texto_cmd.strip())
 
-
-# ── Instância Singleton Global do Servidor ───────────────────────────────────
 
 _pipeline_futures: set = set()
 _daemon_instance: VoiceDaemon | None = None
@@ -581,7 +550,6 @@ def _executar_no_pipeline(texto: str):
     return fut
 
 
-
 def _loop_microfone(daemon: VoiceDaemon) -> None:
     import sounddevice as sd
 
@@ -604,7 +572,7 @@ def _loop_microfone(daemon: VoiceDaemon) -> None:
                 callback=_callback,
             ):
                 daemon._stream_aberto = True
-                daemon._warmup_restante = 18  # Ignora os primeiros 1.8s de estabilização do microfone no startup
+                daemon._warmup_restante = 18
                 daemon._resetar_captura()
                 backoff = 1.0
                 print("[VoiceDaemon] Escuta contínua em standby — aguardando exclusivamente 'FRYIVS / Fraives / Frives'.")
@@ -713,7 +681,6 @@ def set_muted(mutado: bool) -> bool:
     if _daemon_instance is not None:
         _daemon_instance.set_muted(mutado)
         return True
-    # Mesmo sem daemon ativo, registra o estado global para bloquear TTS/áudio
     return False
 
 

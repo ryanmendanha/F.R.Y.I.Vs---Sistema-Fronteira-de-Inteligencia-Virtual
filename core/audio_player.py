@@ -45,7 +45,7 @@ def _tocar_arquivo(caminho: str) -> None:
             modo = _mci(f"status {alias} mode")
             if modo != "playing" and time.time() - inicio > 0.3:
                 break
-            if time.time() - inicio > 120:  # trava de segurança
+            if time.time() - inicio > 120:
                 break
             time.sleep(0.05)
     finally:
@@ -97,7 +97,6 @@ def tocar(caminho: str, bloquear: bool = True, timeout: float = 120.0) -> bool:
     """
     if not disponivel() or not caminho or not os.path.exists(caminho):
         return False
-    # Bloqueia reprodução de áudio quando o sistema está mutado
     try:
         from core.mute_state import is_muted
         if is_muted():
@@ -113,7 +112,7 @@ def tocar(caminho: str, bloquear: bool = True, timeout: float = 120.0) -> bool:
         copia = caminho
     _garantir_thread()
     feito = threading.Event()
-    _tocando.set()  # marca imediatamente (half-duplex do microfone)
+    _tocando.set()
     _fila.put((copia, feito))
     if bloquear:
         feito.wait(timeout)

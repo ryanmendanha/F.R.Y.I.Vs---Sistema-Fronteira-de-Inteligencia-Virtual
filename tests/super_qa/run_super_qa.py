@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """
 run_super_qa.py — Runner Unificado dos 250 Testes da FRYIVS Super QA
 Executa toda a bateria, coleta métricas, detecta falhas e gera o relatório final.
@@ -11,7 +10,6 @@ import re
 from pathlib import Path
 from datetime import datetime
 
-# Garante saída UTF-8 no Windows sem erros de charmap
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 if hasattr(sys.stderr, "reconfigure"):
@@ -63,20 +61,18 @@ def executar_categoria(codigo: str, info: dict, python_exe: str) -> dict:
         capture_output=True,
         text=True,
         cwd=str(PROJECT_ROOT),
-        timeout=300  # 5 minutos por categoria
+        timeout=300
     )
     elapsed = (time.perf_counter() - t0)
 
     stdout = resultado.stdout
     stderr = resultado.stderr
 
-    # Parsear resultados do pytest
     passou = len(re.findall(r' PASSED', stdout))
     falhou = len(re.findall(r' FAILED', stdout))
     erro = len(re.findall(r' ERROR', stdout))
     skipped = len(re.findall(r' SKIPPED', stdout))
 
-    # Extrair resumo final do pytest
     resumo_match = re.search(r'(\d+) passed(?:.*?(\d+) failed)?(?:.*?(\d+) error)?(?:.*?(\d+) warning)?', stdout)
 
     print(stdout[-3000:] if len(stdout) > 3000 else stdout)
@@ -129,7 +125,6 @@ def gerar_relatorio_md(resultados: list, bugs: dict, total_passou: int, total_fa
     pct_passou = round((total_passou / total) * 100, 1) if total > 0 else 0
     pct_falhou = round((total_falhou / total) * 100, 1) if total > 0 else 0
 
-    # Determinar veredito
     bugs_s1_abertos = len(bugs["S1"])
     bugs_s2_criticos = len([b for b in bugs["S2"] if any(c in b for c in ["ARQ", "MEM", "AUT"])])
 
@@ -240,7 +235,6 @@ def main():
     print(f"   Sandbox: {SANDBOX}")
     print("=" * 70)
 
-    # Detectar o Python correto (venv ou sistema)
     python_exe = sys.executable
     venv_python = PROJECT_ROOT / "venv" / "Scripts" / "python.exe"
     if venv_python.exists():
@@ -277,17 +271,14 @@ def main():
 
     tempo_total = time.perf_counter() - t_inicio
 
-    # Totais consolidados
     total_passou = sum(r["passou"] for r in resultados)
     total_falhou = sum(r["falhou"] for r in resultados)
     total_erro = sum(r["erro"] for r in resultados)
     total_skipped = sum(r["skipped"] for r in resultados)
     total_esperado = sum(r["total_esperado"] for r in resultados)
 
-    # Análise de bugs
     bugs = calcular_severidade(resultados)
 
-    # Salvar JSON
     dados_json = {
         "timestamp": TIMESTAMP,
         "total_esperado": total_esperado,
@@ -301,13 +292,11 @@ def main():
     }
     RELATORIO_JSON.write_text(json.dumps(dados_json, indent=2, ensure_ascii=False), encoding="utf-8")
 
-    # Gerar e salvar relatório Markdown
     relatorio_md = gerar_relatorio_md(
         resultados, bugs, total_passou, total_falhou, total_erro, total_skipped, tempo_total
     )
     RELATORIO_MD.write_text(relatorio_md, encoding="utf-8")
 
-    # Imprimir resumo final
     print("\n\n" + "=" * 70)
     print("   📊 RESULTADO FINAL DA BATERIA SUPER QA")
     print("=" * 70)

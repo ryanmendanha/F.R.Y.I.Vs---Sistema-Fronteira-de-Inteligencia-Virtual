@@ -30,7 +30,6 @@ except ImportError:
     pytesseract = None
     Image = None
 
-# Configura o caminho do binário do Tesseract no Windows se existir
 _TESSERACT_COMMON_PATHS = [
     r"C:\Program Files\Tesseract-OCR\tesseract.exe",
     r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
@@ -43,11 +42,9 @@ def _configurar_tesseract() -> bool:
     if pytesseract is None:
         return False
 
-    # 1. Se já está no PATH
     if shutil.which("tesseract"):
         return True
 
-    # 2. Verificar caminhos padrão do instalador no Windows
     for caminho in _TESSERACT_COMMON_PATHS:
         if os.path.exists(caminho):
             pytesseract.pytesseract.tesseract_cmd = caminho
@@ -55,8 +52,6 @@ def _configurar_tesseract() -> bool:
 
     return False
 
-
-# ── Schemas de Parâmetros Pydantic ──────────────────────────────────────────
 
 class LocalizarImagemParams(BaseModel):
     imagem_alvo: str = Field(
@@ -76,8 +71,6 @@ class LerTextoTelaParams(BaseModel):
     )
 
 
-# ── Funções Executáveis ─────────────────────────────────────────────────────
-
 def localizar_e_clicar_imagem(imagem_alvo: str, confianca: float = 0.8) -> str:
     """
     Localiza visualmente um botão, ícone ou imagem na tela usando OpenCV e clica nele com PyAutoGUI.
@@ -86,7 +79,6 @@ def localizar_e_clicar_imagem(imagem_alvo: str, confianca: float = 0.8) -> str:
         return "Erro: As bibliotecas PyAutoGUI e OpenCV são necessárias para busca visual de botões."
 
     try:
-        # Se for nome simples, procura na pasta screenshots/ ou na raiz
         caminho = imagem_alvo
         if not os.path.isabs(caminho):
             pastas_teste = [
@@ -102,7 +94,6 @@ def localizar_e_clicar_imagem(imagem_alvo: str, confianca: float = 0.8) -> str:
         if not os.path.exists(caminho):
             return f"Arquivo de imagem de referência não encontrado: '{imagem_alvo}'."
 
-        # PyAutoGUI com OpenCV acelera e suporta parâmetro confidence
         ponto = pyautogui.locateCenterOnScreen(caminho, confidence=confianca)
         if ponto is None:
             return f"O elemento visual '{os.path.basename(caminho)}' não foi encontrado na tela com confiança {confianca}."
@@ -131,16 +122,12 @@ def ler_texto_da_tela(regiao: list[int] | None = None) -> str:
         regiao_tuple = tuple(regiao) if (regiao and len(regiao) == 4) else None
         screenshot = pyautogui.screenshot(region=regiao_tuple)
 
-        # Converter para formato OpenCV (BGR)
         img_np = np.array(screenshot)
         img_cv = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
 
-        # Pré-processamento com OpenCV para maximizar precisão do OCR
         gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
-        # Binarização adaptativa para texto nítido
         processed = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
 
-        # Extrair texto via PyTesseract
         texto_extraido = pytesseract.image_to_string(processed, lang="por+eng")
         texto_limpo = "\n".join([line.strip() for line in texto_extraido.splitlines() if line.strip()])
 
@@ -154,8 +141,6 @@ def ler_texto_da_tela(regiao: list[int] | None = None) -> str:
     except Exception as e:
         return f"Falha ao realizar OCR na tela: {e}"
 
-
-# ── Schemas OpenAPI ─────────────────────────────────────────────────────────
 
 VISUAL_OCR_SCHEMAS: Final[list[dict[str, Any]]] = [
     {

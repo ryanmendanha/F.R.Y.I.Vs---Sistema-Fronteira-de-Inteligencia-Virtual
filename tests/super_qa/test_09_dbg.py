@@ -27,7 +27,6 @@ def _ok(r) -> bool:
     return isinstance(r, str) and len(r) > 2
 
 
-# ── DBG-001 ──────────────────────────────────────────────────────────────────
 def test_DBG_001_skill_inexistente():
     """DBG-001: execute_skill com nome inexistente — erro amigável."""
     r = execute_skill("skill_que_nao_existe_jamais_999")
@@ -35,7 +34,6 @@ def test_DBG_001_skill_inexistente():
     assert any(kw in r.lower() for kw in ["não encontrada", "nao encontrada", "erro"]), r
 
 
-# ── DBG-002 ──────────────────────────────────────────────────────────────────
 def test_DBG_002_args_obrigatorios_faltando():
     """DBG-002: execute_skill sem argumentos obrigatórios — TypeError tratado."""
     r = execute_skill("gerenciar_arquivos", {})
@@ -43,23 +41,19 @@ def test_DBG_002_args_obrigatorios_faltando():
     assert any(kw in r.lower() for kw in ["erro", "argumento", "required", "missing"]), r
 
 
-# ── DBG-003 ──────────────────────────────────────────────────────────────────
 def test_DBG_003_tipo_argumento_errado():
     """DBG-003: Argumento com tipo errado (bool onde espera str) — sem crash fatal."""
     r = execute_skill("consultar_planilha", {"caminho_arquivo": True, "acao": "resumo"})
     assert _ok(r)
 
 
-# ── DBG-004 ──────────────────────────────────────────────────────────────────
 def test_DBG_004_acao_desconhecida_gerenciar():
     """DBG-004: gerenciar_arquivos com ação desconhecida -- mensagem de erro ou pedido de destino."""
     r = gerenciar_arquivos("acao_inventada_xyz", sb("qualquer.txt"))
     assert _ok(r)
-    # Ação inválida pode cair em branch de destino nulo ou retornar erro -- ambos são aceitáveis
     assert any(kw in r.lower() for kw in ["desconhecida", "desconhecido", "inválida", "destino", "ação"]), r
 
 
-# ── DBG-005 ──────────────────────────────────────────────────────────────────
 def test_DBG_005_caminho_disco_inexistente():
     """DBG-005: Caminho de disco inexistente (Z:\\ nao montado) - erro claro."""
     r = gerenciar_arquivos("listar", r"Z:\pasta_nao_existe")
@@ -67,7 +61,6 @@ def test_DBG_005_caminho_disco_inexistente():
     assert any(kw in r.lower() for kw in ["não encontrad", "nao encontrad", "inexistente"]), r
 
 
-# ── DBG-006 ──────────────────────────────────────────────────────────────────
 def test_DBG_006_deletar_caminho_protegido_windows():
     """DBG-006: Bloqueio de segurança para System32."""
     r = gerenciar_arquivos("deletar", r"C:\Windows\System32")
@@ -75,7 +68,6 @@ def test_DBG_006_deletar_caminho_protegido_windows():
     assert any(kw in r.lower() for kw in ["bloqueado", "protegido", "segurança"]), r
 
 
-# ── DBG-007 ──────────────────────────────────────────────────────────────────
 def test_DBG_007_deletar_raiz_c():
     """DBG-007: Bloqueio de seguranca para raiz C:\\."""
     r = gerenciar_arquivos("deletar", r"C:\\")
@@ -83,7 +75,6 @@ def test_DBG_007_deletar_raiz_c():
     assert any(kw in r.lower() for kw in ["bloqueado", "protegido", "segurança"]), r
 
 
-# ── DBG-008 ──────────────────────────────────────────────────────────────────
 def test_DBG_008_copiar_sem_destino():
     """DBG-008: copiar sem argumento 'destino' — mensagem descritiva."""
     r = gerenciar_arquivos("copiar", sb("qualquer.txt"), None)
@@ -91,7 +82,6 @@ def test_DBG_008_copiar_sem_destino():
     assert any(kw in r.lower() for kw in ["destino", "requer", "obrigatório"]), r
 
 
-# ── DBG-009 ──────────────────────────────────────────────────────────────────
 def test_DBG_009_planilha_formato_invalido():
     """DBG-009: Tentativa de leitura de PDF como planilha."""
     caminho = sb("fake.pdf")
@@ -102,7 +92,6 @@ def test_DBG_009_planilha_formato_invalido():
     assert any(kw in r.lower() for kw in ["não suportado", "nao suportado", "formato", "suportados"]), r
 
 
-# ── DBG-010 ──────────────────────────────────────────────────────────────────
 def test_DBG_010_planilha_corrompida():
     """DBG-010: Leitura de arquivo .xlsx corrompido (bytes aleatórios)."""
     caminho = sb("corrompido.xlsx")
@@ -113,7 +102,6 @@ def test_DBG_010_planilha_corrompida():
     assert any(kw in r.lower() for kw in ["erro", "falha", "inválido", "corrompido", "pandas"]), r
 
 
-# ── DBG-011 ──────────────────────────────────────────────────────────────────
 def test_DBG_011_word_corrompido():
     """DBG-011: Leitura de .docx corrompido — erro amigável."""
     caminho = sb("corrompido.docx")
@@ -124,56 +112,47 @@ def test_DBG_011_word_corrompido():
     assert any(kw in r.lower() for kw in ["erro", "falha", "inválido"]), r
 
 
-# ── DBG-012 ──────────────────────────────────────────────────────────────────
 def test_DBG_012_caminho_barras_mistas():
     """DBG-012: Caminhos com barras normais e invertidas misturadas."""
     pasta = SANDBOX / "barras_mistas"
     pasta.mkdir(parents=True, exist_ok=True)
-    # Caminho com barras normais
     caminho = str(pasta).replace("\\", "/") + "/arquivo_barras.txt"
     Path(caminho).write_text("teste de barras", encoding="utf-8")
     r = gerenciar_arquivos("listar", str(pasta))
     assert _ok(r)
 
 
-# ── DBG-013 ──────────────────────────────────────────────────────────────────
 def test_DBG_013_string_vazia_gerenciar():
     """DBG-013: gerenciar_arquivos com strings vazias — sem crash."""
     r = gerenciar_arquivos("listar", "")
     assert _ok(r)
 
 
-# ── DBG-014 ──────────────────────────────────────────────────────────────────
 def test_DBG_014_nome_nulo_execute_skill():
     """DBG-014: execute_skill com None como nome — sem crash."""
     try:
-        r = execute_skill(None)  # type: ignore
+        r = execute_skill(None)
         assert isinstance(r, str)
     except TypeError:
-        pass  # Aceitável — erro explícito de tipo é OK
+        pass
 
 
-# ── DBG-015 ──────────────────────────────────────────────────────────────────
 def test_DBG_015_path_traversal_bloqueado():
     """DBG-015: Path traversal com ../../../../ -- Path.resolve() normaliza o caminho."""
     caminho_alvo = sb("../../../../tentativa_traversal/indesejado.txt")
     caminho_resolvido = Path(caminho_alvo).resolve()
-    # A função deve executar sem crash
     r = gerenciar_arquivos("criar_pasta", caminho_alvo)
     assert _ok(r)
-    # O Path.resolve() sempre normaliza -- verificar que não foi criado em System32 real do Windows
     assert "windows\\system32" not in str(caminho_resolvido).lower() or not Path(caminho_resolvido).exists(), \
         f"Path traversal resultou em caminho perigoso real: {caminho_resolvido}"
 
 
-# ── DBG-016 ──────────────────────────────────────────────────────────────────
 def test_DBG_016_execute_skill_planilha_caminho_vazio():
     """DBG-016: Criar planilha com caminho vazio — erro amigável."""
     r = execute_skill("criar_planilha", {"caminho_arquivo": "", "abrir_no_excel": False})
     assert isinstance(r, str)
 
 
-# ── DBG-017 ──────────────────────────────────────────────────────────────────
 def test_DBG_017_consultar_planilha_inexistente():
     """DBG-017: Consultar planilha que não existe — mensagem amigável."""
     r = consultar_planilha(sb("nao_existe_planilha.xlsx"), acao="resumo")
@@ -181,7 +160,6 @@ def test_DBG_017_consultar_planilha_inexistente():
     assert any(kw in r.lower() for kw in ["não encontrado", "nao encontrado", "inexistente"]), r
 
 
-# ── DBG-018 ──────────────────────────────────────────────────────────────────
 def test_DBG_018_ler_word_extensao_errada():
     """DBG-018: ler_documento_word com .txt em vez de .docx."""
     caminho = sb("nao_e_word.txt")
@@ -192,7 +170,6 @@ def test_DBG_018_ler_word_extensao_errada():
     assert any(kw in r.lower() for kw in ["inválido", "invalido", ".docx", "suportados"]), r
 
 
-# ── DBG-019 ──────────────────────────────────────────────────────────────────
 def test_DBG_019_editar_word_inexistente():
     """DBG-019: Editar documento Word que não existe — erro amigável."""
     r = editar_documento_word(sb("documento_fantasma.docx"), adicionar_paragrafos=["parágrafo"])
@@ -200,7 +177,6 @@ def test_DBG_019_editar_word_inexistente():
     assert any(kw in r.lower() for kw in ["não encontrado", "nao encontrado", "inexistente"]), r
 
 
-# ── DBG-020 ──────────────────────────────────────────────────────────────────
 def test_DBG_020_editar_arquivo_nao_docx():
     """DBG-020: Editar arquivo que existe mas não é .docx — erro de formato."""
     caminho = sb("nao_e_docx.pdf")
@@ -211,24 +187,18 @@ def test_DBG_020_editar_arquivo_nao_docx():
     assert any(kw in r.lower() for kw in ["inválido", "invalido", ".docx"]), r
 
 
-# ── DBG-021 ──────────────────────────────────────────────────────────────────
 def test_DBG_021_criar_planilha_pasta_sem_permissao():
     """DBG-021: Criar planilha em diretório de sistema — erro capturado."""
-    # Usar caminho de sistema mas não esperamos crash
     r = criar_planilha(r"C:\Windows\Temp\fryivs_teste_qa.xlsx", abrir_no_excel=False)
-    # Pode criar (Temp é geralmente gravável) ou falhar graciosamente
     assert isinstance(r, str)
 
 
-# ── DBG-022 ──────────────────────────────────────────────────────────────────
 def test_DBG_022_execute_skill_args_extras():
     """DBG-022: execute_skill com argumentos extras não esperados."""
     r = execute_skill("obter_hora_data", {"arg_extra_invalido": "valor_irrelevante"})
-    # Pode ignorar o argumento extra ou dar erro amigável
     assert isinstance(r, str)
 
 
-# ── DBG-023 ──────────────────────────────────────────────────────────────────
 def test_DBG_023_gerenciar_arquivos_mover_sem_destino():
     """DBG-023: mover sem destino — mensagem exigindo destino."""
     r = gerenciar_arquivos("mover", sb("qualquer.txt"))
@@ -236,7 +206,6 @@ def test_DBG_023_gerenciar_arquivos_mover_sem_destino():
     assert any(kw in r.lower() for kw in ["destino", "requer", "obrigatório"]), r
 
 
-# ── DBG-024 ──────────────────────────────────────────────────────────────────
 def test_DBG_024_criar_documento_word_sem_conteudo():
     """DBG-024: Criar documento Word sem nenhum conteúdo — apenas arquivo vazio válido."""
     r = criar_documento_word(sb("word_vazio.docx"))
@@ -244,7 +213,6 @@ def test_DBG_024_criar_documento_word_sem_conteudo():
     assert Path(sb("word_vazio.docx")).exists(), f"Documento vazio não criado: {r}"
 
 
-# ── DBG-025 ──────────────────────────────────────────────────────────────────
 def test_DBG_025_word_titulo_muito_longo():
     """DBG-025: Criar Word com título de 500 caracteres — sem crash."""
     titulo_longo = "T" * 500
@@ -252,7 +220,6 @@ def test_DBG_025_word_titulo_muito_longo():
     assert isinstance(r, str)
 
 
-# ── DBG-026 ──────────────────────────────────────────────────────────────────
 def test_DBG_026_planilha_com_dados_nulos():
     """DBG-026: Planilha com dados contendo None/null — sem crash."""
     import pandas as pd
@@ -263,14 +230,12 @@ def test_DBG_026_planilha_com_dados_nulos():
     assert _ok(r)
 
 
-# ── DBG-027 ──────────────────────────────────────────────────────────────────
 def test_DBG_027_execute_skill_argumento_none_em_dict():
     """DBG-027: execute_skill com valor None dentro do dicionário de argumentos."""
     r = execute_skill("gerenciar_arquivos", {"acao": "listar", "origem": None})
     assert isinstance(r, str)
 
 
-# ── DBG-028 ──────────────────────────────────────────────────────────────────
 def test_DBG_028_criacao_pasta_nome_especial():
     """DBG-028: Criar pasta com nome contendo underscores e hífens."""
     pasta = sb("pasta-com-hífen_e_underscore")
@@ -278,7 +243,6 @@ def test_DBG_028_criacao_pasta_nome_especial():
     assert Path(pasta).exists(), f"Pasta especial não criada: {r}"
 
 
-# ── DBG-029 ──────────────────────────────────────────────────────────────────
 def test_DBG_029_todos_skills_registry_executaveis():
     """DBG-029: Verificar que nenhuma skill no registry causa ImportError ao referenciar."""
     for nome in SKILLS_REGISTRY:
@@ -287,14 +251,13 @@ def test_DBG_029_todos_skills_registry_executaveis():
         assert func.__name__ is not None
 
 
-# ── DBG-030 ──────────────────────────────────────────────────────────────────
 def test_DBG_030_logs_sem_credenciais():
     """DBG-030: Verificar que respostas de erro não expõem chaves ou tokens."""
     import re
     PADROES_SENSIVEIS = [
-        r"sk-[A-Za-z0-9]{20,}",          # OpenAI keys
-        r"AIza[A-Za-z0-9\-_]{35}",       # Google API keys
-        r"Bearer [A-Za-z0-9\-_\.]{20,}", # Bearer tokens
+        r"sk-[A-Za-z0-9]{20,}",
+        r"AIza[A-Za-z0-9\-_]{35}",
+        r"Bearer [A-Za-z0-9\-_\.]{20,}",
     ]
     resultados_teste = [
         execute_skill("funcao_inexistente"),

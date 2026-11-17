@@ -31,7 +31,6 @@ def _clean_schema_for_gemini(schema: Any) -> Any:
     return schema
 
 
-# Modelos com fallback em caso de sobrecarga (503 / 429) nos servidores do Google
 FALLBACK_MODELS: Final[list[str]] = list(dict.fromkeys([
     PREFERRED_MODEL,
     "gemini-flash-lite-latest",
@@ -80,7 +79,6 @@ def _format_history_for_gemini(
             "parts": [{"text": str(content)}]
         })
 
-    # O Gemini exige que os turnos alternem estritamente e comecem por 'user'
     validated: list[dict[str, Any]] = []
     expected_role = "user"
     for item in gemini_contents:
@@ -111,13 +109,9 @@ def ask_gemini(
     if context:
         full_system += f"\n\nContexto relevante da memória:\n{context}"
 
-    # Monta histórico + mensagem atual do usuário
     contents = _format_history_for_gemini(conversation_history)
-    # Garante alternância estrita antes de adicionar novo turno 'user'.
-    # Se o último turno já for 'user' (histórico malformado), descarta o duplicado
-    # em vez de inventar uma resposta do model — evita HTTP 400 do Gemini.
     if contents and contents[-1].get("role") == "user":
-        contents.pop()  # remove turno user duplicado do histórico
+        contents.pop()
     contents.append({
         "role": "user",
         "parts": [{"text": prompt}]
@@ -136,7 +130,6 @@ def ask_gemini(
             "parts": [{"text": full_system}]
         }
 
-    # Conversão de esquemas de tools para o formato v1beta (functionDeclarations)
     if tools:
         func_decls: list[dict[str, Any]] = []
         for t in tools:
@@ -159,7 +152,6 @@ def ask_gemini(
     }
 
     last_error: str = ""
-    # Tenta o modelo preferido e modelos de fallback se houver sobrecarga
     tried_models: list[str] = []
     for model in FALLBACK_MODELS:
         if model in tried_models:
@@ -201,7 +193,6 @@ def ask_gemini(
                     return " ".join(text_parts).strip(), []
         except urllib.error.HTTPError as e:
             last_error = f"HTTP {e.code}: {e.reason}"
-            # Se for erro 503 (sobrecarga) ou 404, continua para o próximo modelo de fallback
             if e.code in (503, 502, 429, 404):
                 print(f"[Gemini] Modelo '{clean_model}' indisponível ({e.code}). Tentando fallback...")
                 continue

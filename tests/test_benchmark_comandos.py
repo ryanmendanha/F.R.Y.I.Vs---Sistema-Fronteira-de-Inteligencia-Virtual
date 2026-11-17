@@ -19,17 +19,14 @@ def test_benchmark_comandos_jsonl_estrutura_e_acuracia():
         if line.strip()
     ]
 
-    # B1 & B2: Entre 80 e 120 comandos base, cada um com pelo menos 2 variantes (3 formas no total)
     assert len(linhas) >= 95
     for item in linhas:
         assert "id" in item and "categoria" in item and "comando" in item
         assert isinstance(item.get("variantes"), list) and len(item["variantes"]) >= 2
 
-    # Cobertura integral das 43 skills de SKILLS_REGISTRY
     assert resumo["skills_faltantes"] == [], f"Skills sem cobertura no benchmark: {resumo['skills_faltantes']}"
     assert resumo["skills_cobertas_total"] == len(SKILLS_REGISTRY)
 
-    # Acurácia Top-1 >= 95% e Recall Top-3 >= 98% nas 300+ frases avaliadas
     assert resumo["acuracia_top1_pct"] >= 95.0, (
         f"Acurácia Top-1 abaixo de 95%: {resumo['acuracia_top1_pct']}% | Falhas: {resumo['falhas'][:5]}"
     )

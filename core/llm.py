@@ -73,7 +73,6 @@ IDENTIDADE:
 - Finalize sempre seus pensamentos de forma completa, nunca interrompendo a frase no meio.
 """
 
-# ── Perfis de modelo configuráveis por limite de tokens ─────────────────────────
 MODEL_PROFILES: Final[dict[str, dict[str, Any]]] = {
     "fryvis_beta": {
         "id": "fryvis_beta",
@@ -99,8 +98,6 @@ MODEL_PROFILES: Final[dict[str, dict[str, Any]]] = {
 }
 DEFAULT_PROFILE: Final[str] = "fryvis_1.0"
 
-# ── Templates de resposta instantânea por skill (eliminam 2ª chamada ao LLM) ─────────────────
-# Cada template usa {resultado} para inserir a saída da skill de forma elegante e honrosa.
 _SKILL_RESPONSE_TEMPLATES: dict[str, str] = {
     "abrir_programa":     "{resultado}",
     "listar_janelas":      "Janelas ativas detectadas, senhor:\n{resultado}",
@@ -118,7 +115,6 @@ _SKILL_RESPONSE_TEMPLATES: dict[str, str] = {
     "pesquisar_youtube":  "Reprodução iniciada no YouTube, senhor. {resultado}",
     "status_sistema":     "Telemetria do sistema obtida, senhor:\n{resultado}",
     "bloquear_tela":      "Tela bloqueada com sucesso, senhor. {resultado}",
-    # Automação Web (Selenium)
     "navegar_para":       "Navegação web realizada com sucesso, senhor. {resultado}",
     "pesquisar_na_web":   "Pesquisa web executada, senhor. {resultado}",
     "clicar_elemento_web": "Ação de clique na web concluída, senhor. {resultado}",
@@ -127,19 +123,15 @@ _SKILL_RESPONSE_TEMPLATES: dict[str, str] = {
     "ler_conteudo_pagina": "Leitura da página web finalizada, senhor:\n{resultado}",
     "capturar_tela_web":  "Captura da página web concluída, senhor. {resultado}",
     "fechar_navegador":   "Navegador web encerrado, senhor. {resultado}",
-    # Visão Computacional e OCR
     "localizar_e_clicar_imagem": "Botão visual localizado e clicado com sucesso, senhor. {resultado}",
     "ler_texto_da_tela":  "Texto extraído da tela com sucesso, senhor:\n{resultado}",
-    # Arquivos e Planilhas
     "gerenciar_arquivos": "Operação no sistema de arquivos realizada, senhor. {resultado}",
     "consultar_planilha": "Processamento da planilha concluído, senhor. {resultado}",
-    # Agendamento e Notificações
     "agendar_execucao":   "Rotina agendada no sistema com sucesso, senhor. {resultado}",
     "listar_agendamentos": "Lista de tarefas agendadas, senhor:\n{resultado}",
     "enviar_alerta_webhook": "Notificação externa enviada, senhor. {resultado}",
 }
 
-# Palavras que indicam saudção / conversa casual (sem ação de sistema)
 _CONVERSATIONAL_KEYWORDS: frozenset[str] = frozenset({
     "oi", "ola", "hey", "ei", "bom dia", "boa tarde", "boa noite",
     "como vai", "tudo bem", "tudo bom", "tudo certo", "tudo tranquilo",
@@ -190,7 +182,6 @@ def _is_asking_about_companies(text: str) -> bool:
     if not norm:
         return False
 
-    # Não interceptar comandos de criação de arquivos, planilhas, documentos ou pesquisa de empresas reais
     if any(w in norm for w in (
         "crie", "criar", "abra", "abrir", "pesquise", "pesquisar", "procure",
         "planilha", "excel", "word", "documento", "arquivo", "pasta",
@@ -213,7 +204,6 @@ def _is_asking_about_companies(text: str) -> bool:
     if any(g in norm for g in gatilhos_funcao):
         return True
 
-    # Perguntas diretas curtas como "e para as empresas?", "e nas empresas?"
     if re.search(r"\b(?:para|nas|em) (?:as |uma )?empresas?\b", norm) and len(norm.split()) <= 7:
         return True
 
@@ -232,7 +222,6 @@ def _is_direct_time_date_query(text: str) -> bool:
     norm = " ".join(norm.split())
     if not norm:
         return False
-    # Não interceptar comandos compostos ou de agendamento/outros domínios
     if any(w in norm for w in (
         "agend", "alarme", "lembrete", "todo dia", "a cada", "abra", "abrir",
         "crie", "criar", "pesquis", "planilha", "word", "documento", "chrome",
@@ -258,14 +247,11 @@ def _is_direct_time_date_query(text: str) -> bool:
 
 
 _ACTION_AND_COMMAND_TOKENS: tuple[str, ...] = (
-    # Verbos de ação — abertura de apps / janelas / automação / web / arquivos
     "abr", "fech", "minim", "maxim", "digit", "press", "screenshot",
     "volume", "janela", "programa", "listar",
-    # Verbos e triggers adicionais para comandos
     "inicia", "inici", "rodar", "roda", "rode",
     "lanca", "lance", "aciona", "execut", "execu",
     "start", "open", "launch",
-    # Nomes de apps populares (para capturar '"rodar spotify"', '"iniciar chrome"')
     "notepad", "chrome", "edge", "firefox", "spotify",
     "discord", "steam", "calc", "explorer", "cmd", "powershell",
     "terminal", "vscode", "code", "word", "excel", "paint", "taskmgr",
@@ -283,14 +269,10 @@ def _is_conversational(text: str) -> bool:
     normalized = _normalize(text.strip())
     clean_norm = re.sub(r"[^\w\s]", " ", normalized)
     clean_norm = re.sub(r"\s+", " ", clean_norm).strip()
-    # Se estiver perguntando sobre si mesma ou sua função para empresas, é conversacional
     if _is_asking_about_self(text) or _is_asking_about_companies(text):
         return True
-    # Se contiver qualquer verbo/alvo de ação ou comando (ex: "Muito bem, acesse esse link... no Chrome"),
-    # NUNCA tratar como apenas conversacional para não desabilitar as ferramentas (tools)!
     if any(v in clean_norm for v in _ACTION_AND_COMMAND_TOKENS):
         return False
-    # Verifica match direto com palavras-chave conversacionais
     for kw in _CONVERSATIONAL_KEYWORDS:
         if (
             clean_norm == kw
@@ -299,7 +281,6 @@ def _is_conversational(text: str) -> bool:
             or f" {kw} " in f" {clean_norm} "
         ):
             return True
-    # Textos muito curtos sem verbo de ação são provavelmente conversacionais
     words = normalized.split()
     if len(words) <= 2:
         return True
@@ -311,12 +292,10 @@ def _is_gibberish(text: str) -> bool:
     text = text.strip()
     if not text:
         return True
-    # Se for muito longo (> 60 chars) provavelmente não é gibberish simples
     if len(text) > 60:
         return False
     normalized = _normalize(text)
 
-    # Verbos e substantivos claros de ação garantem que NÃO é gibberish
     if any(k in normalized for k in (
         "crie", "criar", "abra", "abrir", "faca", "fazer", "pesquise", "pesquisar",
         "planilha", "word", "documento", "arquivo", "pasta", "despesa", "relatorio",
@@ -326,23 +305,19 @@ def _is_gibberish(text: str) -> bool:
     )):
         return False
 
-    # Se contém qualquer termo técnico / atalho conhecido, não é gibberish
     tokens = re.split(r"[\s\._\-/\\]+", normalized)
     for token in tokens:
         if token in _TECH_WHITELIST:
             return False
 
-    # Remove números e espaços para análise de caracteres
     letters = re.sub(r"[^a-z]", "", normalized)
     if not letters:
         return False
-    # Taxa de vogais: português normal tem 35-55% de vogais
     vowels = sum(1 for c in letters if c in "aeiou")
     vowel_ratio = vowels / len(letters)
-    if vowel_ratio < 0.15:  # Menos de 15% de vogais = gibberish
+    if vowel_ratio < 0.15:
         return True
 
-    # Verifica blocos com excesso de consoantes separando pontuações
     for word in tokens:
         consonant_streak = 0
         for ch in word:
@@ -350,7 +325,7 @@ def _is_gibberish(text: str) -> bool:
                 consonant_streak = 0
             elif ch.isalpha():
                 consonant_streak += 1
-                if consonant_streak >= 5:  # 5+ consoantes seguidas na mesma palavra = gibberish
+                if consonant_streak >= 5:
                     return True
     return False
 
@@ -360,18 +335,15 @@ def _extract_tool_call(tool: Any) -> tuple[str, dict[str, Any]]:
     Extrai (nome, argumentos) de um tool_call do Ollama.
     Suporta tanto objetos com atributos (.function) quanto dicionários ({"function": ...}).
     """
-    # Ollama >= 0.3 retorna objetos com atributo .function
     if hasattr(tool, "function"):
         func = tool.function
         name = getattr(func, "name", "") or ""
         raw_args = getattr(func, "arguments", {}) or {}
     else:
-        # Fallback para dicionário
         func = tool.get("function", {}) if isinstance(tool, dict) else {}
         name = func.get("name", "") if isinstance(func, dict) else ""
         raw_args = func.get("arguments", {}) if isinstance(func, dict) else {}
 
-    # Argumentos podem chegar como string JSON
     if isinstance(raw_args, str):
         try:
             raw_args = json.loads(raw_args)
@@ -401,7 +373,6 @@ def _garantir_tratamento_honroso(texto: str) -> str:
     if not t:
         return "Às suas ordens, senhor."
 
-    # Remove duplicações acidentais de vocativo (ex: "para o senhor, senhor." -> "para o senhor.")
     t = re.sub(
         r"\b(para o senhor|ao senhor|do senhor|com o senhor|pelo senhor|senhor)\s*[,;:]?\s+senhor\b",
         r"\1",
@@ -409,17 +380,13 @@ def _garantir_tratamento_honroso(texto: str) -> str:
         flags=re.IGNORECASE,
     )
 
-    # Se a resposta foi cortada pelo limite de tokens sem pontuação final:
     if not t.endswith((".", "!", "?")):
-        # Se houver uma pontuação final anterior que preserva a maior parte da resposta, aproveita até ela
         last_punct = max(t.rfind("."), t.rfind("!"), t.rfind("?"))
         if last_punct > 20:
             t = t[:last_punct + 1].strip()
         else:
-            # Caso contrário, remove a última palavra incompleta cortada e fecha com ponto
             parts = t.rsplit(" ", 1)
             if len(parts) > 1 and len(parts[0]) > 10:
-                # Remove vírgula residual se houver antes de fechar
                 base = parts[0].rstrip(",;:")
                 t = f"{base}."
 
@@ -462,7 +429,6 @@ def ask_fryvis(
     """
     active_provider = (provider or LLM_PROVIDER).lower()
 
-    # ── Pré-processamento Python (não depende do LLM) ─────────────────────────
     if _is_gibberish(prompt):
         print(f"[LLM] Gibberish detectado: '{prompt[:40]}' — retornando sem chamar LLM")
         return "Não é possível usar esse comando, senhor.", []
@@ -472,13 +438,9 @@ def ask_fryvis(
     if bloqueado_seguranca:
         return msg_seguranca, []
 
-    # Fast-path determinístico para perguntas sobre a função da assistente para empresas:
     if _is_asking_about_companies(prompt):
         return RESPOSTA_FUNCAO_EMPRESAS, []
 
-    # Fast-path determinístico para consultas diretas de hora e data do sistema:
-    # garante execução 100% confiável e instantânea (<1ms) da skill obter_hora_data,
-    # evitando omissão de tool_call pelo LLM devido ao histórico da conversa ou memória antiga.
     if tools is None and enable_semantic_skill_routing and _is_direct_time_date_query(prompt):
         resultado_hd = execute_skill("obter_hora_data", {})
         resp_hd = _SKILL_RESPONSE_TEMPLATES.get("obter_hora_data", "{resultado}").format(resultado=resultado_hd)
@@ -492,21 +454,17 @@ def ask_fryvis(
     is_asking_self = _is_asking_about_self(prompt)
     profile_data = MODEL_PROFILES.get(profile, MODEL_PROFILES[DEFAULT_PROFILE])
 
-    # ── num_predict dinâmico baseado no perfil selecionado ───────────────────
     if max_tokens is not None and max_tokens > 0:
         _num_predict = max_tokens
     else:
         _num_predict = profile_data["tokens"]
 
-    # ── GPTCache (Zilliz) Cache Semântico Rápido ─────────────────────────────
-    # Se for conversacional ou pergunta geral e não for comando dinâmico:
     if is_conversational and not tools:
         cached_resp = get_cached_response(prompt)
         if cached_resp:
             print(f"[GPTCache] Resposta recuperada instantaneamente do cache para: '{prompt[:40]}'")
             return _garantir_tratamento_honroso(cached_resp), []
 
-    # ── Provedor Direto Gemini Cloud (Motor Principal) ────────────────────────
     if active_provider in ("gemini", "hybrid"):
         system_inst = (CONVERSATIONAL_PROMPT if is_conversational else SYSTEM_PROMPT)
         system_inst += f"\nDiretriz de extensão obrigatória: {profile_data['prompt_instruction']}"
@@ -517,7 +475,6 @@ def ask_fryvis(
                 "Conclua sua resposta de forma honrosa e completa, tratando sempre o usuário como 'senhor'."
             )
 
-        # Seleciona ferramentas disponíveis para o Gemini
         if is_conversational:
             available_gemini_tools = []
         elif tools is not None:
@@ -539,7 +496,6 @@ def ask_fryvis(
                 tools=available_gemini_tools
             )
 
-            # Se o Gemini disparou chamadas de ferramentas/skills
             if gemini_tool_calls:
                 executed_tools: list[dict[str, Any]] = []
                 for tool in gemini_tool_calls:
@@ -553,13 +509,10 @@ def ask_fryvis(
                         "result": resultado,
                     })
 
-                # Síntese inteligente de resultados de ferramentas
                 is_web_search = any(t["tool"] == "pesquisar_informacao_web" for t in executed_tools)
                 last_tool_name = executed_tools[-1]["tool"]
                 last_result = executed_tools[-1]["result"]
 
-                # OTIMIZAÇÃO: Se houver template direto (ex: obter_hora_data, status_sistema, abrir_programa),
-                # responde instantaneamente sem 2ª chamada desnecessária ao Gemini Cloud
                 if not is_web_search and last_tool_name in _SKILL_RESPONSE_TEMPLATES:
                     resp_direta = _SKILL_RESPONSE_TEMPLATES[last_tool_name].format(resultado=last_result)
                     return _garantir_tratamento_honroso(resp_direta), executed_tools
@@ -594,7 +547,6 @@ def ask_fryvis(
 
                 return _garantir_tratamento_honroso(gemini_resp), executed_tools
 
-            # Se retornou texto com sucesso e sem mensagem de erro da API
             if gemini_resp and not gemini_resp.startswith("Erro:") and not gemini_resp.startswith("Não foi possível obter resposta"):
                 texto_formatado = _garantir_tratamento_honroso(gemini_resp)
                 cache_response(prompt, texto_formatado)
@@ -604,7 +556,6 @@ def ask_fryvis(
         except Exception as e:
             print(f"[LLM] Exceção no Gemini Principal: {e}. Realizando fallback para o motor secundário (Ollama)...")
 
-    # ── Motor Secundário / Local: Ollama ──────────────────────────────────────
     try:
         import ollama
     except ImportError:
@@ -615,7 +566,6 @@ def ask_fryvis(
         "content": CONVERSATIONAL_PROMPT if is_conversational else SYSTEM_PROMPT
     }]
 
-    # Injeta a diretriz de concisão estrita do perfil selecionado
     messages.append({
         "role": "system",
         "content": f"Diretriz de extensão obrigatória: {profile_data['prompt_instruction']}"
@@ -643,7 +593,6 @@ def ask_fryvis(
 
     messages.append({"role": "user", "content": prompt})
 
-    # ── Seleção inteligente de ferramentas via ChromaDB ──────────────────────
     if is_conversational:
         available_tools: list = []
     elif tools is not None:
@@ -666,7 +615,7 @@ def ask_fryvis(
             "model": MODEL,
             "messages": messages,
             "options": {
-                "temperature": 0.2,   # Respostas diretas e precisas
+                "temperature": 0.2,
                 "top_p": 0.9,
                 "num_predict": _ollama_num_predict,
             }
@@ -677,7 +626,6 @@ def ask_fryvis(
         response = ollama.chat(**chat_kwargs)
     except Exception as e:
         err_msg = str(e)
-        # Fallback Automático: se Ollama estiver offline ou der erro de conexão, aciona o Gemini Cloud
         if is_gemini_configured():
             print(f"[LLM Fallback] Ollama indisponível ({err_msg}). Acionando fallback automático para Gemini Cloud...")
             system_inst = (CONVERSATIONAL_PROMPT if is_conversational else SYSTEM_PROMPT)
@@ -706,14 +654,11 @@ def ask_fryvis(
             )
         return f"Erro ao comunicar com Ollama ({MODEL}): {err_msg}", []
 
-    # ── Parsear resposta (suporta objetos e dicts) ────────────────────────────
     raw_message = response.message if hasattr(response, "message") else response.get("message", {})
     message_dict = _message_to_dict(raw_message)
 
-    # tool_calls pode ser atributo ou chave nativa
     tool_calls = message_dict.get("tool_calls") or []
 
-    # Fallback inteligente (AI Engineer pattern): se o modelo cuspir JSON puro no content em vez de tool_calls
     content_text = (message_dict.get("content") or "").strip()
     if not tool_calls and content_text.startswith("{") and content_text.endswith("}"):
         try:
@@ -733,7 +678,6 @@ def ask_fryvis(
     print(f"[LLM] tool_calls detectados: {len(tool_calls)} | tools enviadas: {[t.get('function', {}).get('name') for t in available_tools]}")
 
     if tool_calls:
-        # Adiciona a mensagem do assistente ao histórico
         messages.append(message_dict)
 
         for tool in tool_calls:
@@ -754,7 +698,6 @@ def ask_fryvis(
                 "content": str(resultado),
             })
 
-        # ── Verificação de falha na execução de qualquer skill ───────────────
         _FALHA_KEYWORDS = (
             "não encontrada no registro", "erro ao executar", "erro:", "exception",
             "falha ao criar", "falha ao editar"
@@ -768,9 +711,6 @@ def ask_fryvis(
         if falhas:
             return f"Não foi possível concluir o comando: {'; '.join(falhas)}, senhor.", executed_tools
 
-        # ── OTIMIZAÇÃO: Resposta local por template (elimina 2ª chamada ao LLM) ──────────────────
-        # Em vez de chamar o Ollama novamente só para gerar uma frase amigável (~4–8s extras),
-        # usamos templates pré-definidos por skill que são instantâneos e idiomaticamente corretos.
         template = _SKILL_RESPONSE_TEMPLATES.get(func_name)
         if template:
             resp_final = template.format(resultado=resultado)

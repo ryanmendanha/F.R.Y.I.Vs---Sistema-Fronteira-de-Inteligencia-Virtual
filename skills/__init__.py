@@ -69,9 +69,7 @@ from .code_graph_ops import (
     CODE_GRAPH_SCHEMAS,
 )
 
-# Registro central de todas as funções executáveis da assistente
 SKILLS_REGISTRY: Final[dict[str, Callable[..., str]]] = {
-    # Controle de Sistema e Janelas
     "abrir_programa": abrir_programa,
     "listar_janelas": listar_janelas,
     "focar_janela": focar_janela,
@@ -88,7 +86,6 @@ SKILLS_REGISTRY: Final[dict[str, Callable[..., str]]] = {
     "pesquisar_youtube": pesquisar_youtube,
     "status_sistema": status_sistema,
     "bloquear_tela": bloquear_tela,
-    # Automação Web Avançada (Selenium)
     "navegar_para": navegar_para,
     "pesquisar_na_web": pesquisar_na_web,
     "clicar_elemento_web": clicar_elemento_web,
@@ -97,25 +94,20 @@ SKILLS_REGISTRY: Final[dict[str, Callable[..., str]]] = {
     "ler_conteudo_pagina": ler_conteudo_pagina,
     "capturar_tela_web": capturar_tela_web,
     "fechar_navegador": fechar_navegador,
-    # Visão Computacional e OCR (OpenCV + PyTesseract)
     "localizar_e_clicar_imagem": localizar_e_clicar_imagem,
     "ler_texto_da_tela": ler_texto_da_tela,
-    # Arquivos e Planilhas (Pathlib + Shutil + Pandas + OpenPyXL)
     "gerenciar_arquivos": gerenciar_arquivos,
     "consultar_planilha": consultar_planilha,
     "criar_planilha": criar_planilha,
     "abrir_planilha": abrir_planilha,
     "editar_planilha": editar_planilha,
-    # Documentos Word (.docx) (python-docx)
     "criar_documento_word": criar_documento_word,
     "editar_documento_word": editar_documento_word,
     "ler_documento_word": ler_documento_word,
     "abrir_documento_word": abrir_documento_word,
-    # Agendamento e Notificações (Schedule + Requests)
     "agendar_execucao": agendar_execucao,
     "listar_agendamentos": listar_agendamentos,
     "enviar_alerta_webhook": enviar_alerta_webhook,
-    # Mapeamento Arquitetural e Grafo de Código (Graphify + NetworkX)
     "consultar_mapa_codigo": consultar_mapa_codigo,
     "explicar_modulo_grafo": explicar_modulo_grafo,
     "caminho_entre_componentes": caminho_entre_componentes,
@@ -123,7 +115,6 @@ SKILLS_REGISTRY: Final[dict[str, Callable[..., str]]] = {
     "atualizar_mapa_codigo": atualizar_mapa_codigo,
 }
 
-# Todos os esquemas OpenAPI / JSON Schema para envio ao modelo de linguagem (Ollama / Gemini)
 ALL_SKILL_SCHEMAS: Final[list[dict[str, Any]]] = [
     SKILL_SCHEMA_OPEN_APP,
     *SYSTEM_TOOLS_SCHEMAS,
@@ -165,7 +156,6 @@ def execute_skill(function_name: str, arguments: dict[str, Any] | None = None) -
             return str(func())
         return str(func(**args))
     except TypeError as te:
-        # Se os argumentos passados não baterem exatamente com a assinatura
         return f"Erro nos argumentos para a skill '{function_name}': {te}"
     except Exception as e:
         return f"Erro ao executar a skill '{function_name}': {e}"

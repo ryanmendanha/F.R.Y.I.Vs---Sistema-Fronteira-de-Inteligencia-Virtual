@@ -88,7 +88,6 @@ class TestWakeWordAudioSample:
         audio = decode_audio(str(VOZ_M4A), sampling_rate=SAMPLE_RATE)
         assert len(audio) > SAMPLE_RATE * 5
 
-        # Segmenta as 5 elocuções por energia RMS (blocos de 100ms = 1600 amostras)
         chunk_len = 1600
         limiar = 0.025
         segmentos: list[np.ndarray] = []

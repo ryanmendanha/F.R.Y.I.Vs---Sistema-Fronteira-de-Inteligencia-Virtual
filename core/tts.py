@@ -16,7 +16,6 @@ import re
 import requests
 from dotenv import load_dotenv
 
-# Integrador VoiceStudio TTS (OmniVoice - clonagem de voz, 646+ idiomas)
 try:
     from core.tts_voicestudio import falar_voicestudio, voicestudio_disponivel
 except ImportError:
@@ -26,22 +25,18 @@ except ImportError:
         falar_voicestudio = None
         voicestudio_disponivel = None
 
-# ── Configuração OpenAI TTS ──────────────────────────────────────────────────
-DEFAULT_VOICE = "nova"          # alloy | echo | fable | onyx | nova | shimmer
-TTS_MODEL = "tts-1"            # tts-1 (rápido) ou tts-1-hd (máxima qualidade)
+DEFAULT_VOICE = "nova"
+TTS_MODEL = "tts-1"
 OPENAI_TTS_URL = "https://api.openai.com/v1/audio/speech"
 
-# ── Configuração Edge TTS (fallback gratuito) ────────────────────────────────
-EDGE_TTS_VOICE = "pt-BR-FranciscaNeural"     # Voz feminina natural PT-BR
-EDGE_TTS_VOICE_EN = "en-US-JennyNeural"      # Voz feminina nativa americana para termos em inglês
+EDGE_TTS_VOICE = "pt-BR-FranciscaNeural"
+EDGE_TTS_VOICE_EN = "en-US-JennyNeural"
 
-# Padrão para segmentação bilíngue automática na pronúncia da sigla
 _ENGLISH_PHRASE_REGEX = re.compile(
     r'(Recursive\s+Yield\s+Female\s+Virtual(?:\s+Intelligence)?\s+system)',
     re.IGNORECASE
 )
 
-# ── Thread-safety e Gerenciamento Multi-Usuário ──────────────────────────────
 _TTS_LOCK = threading.Lock()
 AUDIO_CACHE_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -83,8 +78,8 @@ def _safe_atomic_save(temp_path: str, target_path: str) -> bool:
 
 
 _openai_quota_exhausted = False
-_openai_quota_exhausted_at: float = 0.0   # timestamp de quando o circuit breaker fechou
-_OPENAI_CB_TTL: float = 60.0              # segundos antes de tentar novamente (half-open)
+_openai_quota_exhausted_at: float = 0.0
+_OPENAI_CB_TTL: float = 60.0
 
 
 def _falar_openai(texto: str, output_path: str) -> str:
@@ -93,7 +88,6 @@ def _falar_openai(texto: str, output_path: str) -> str:
     if _openai_quota_exhausted:
         if time.time() - _openai_quota_exhausted_at < _OPENAI_CB_TTL:
             return ""
-        # TTL expirado: tenta novamente (circuit breaker half-open)
         _openai_quota_exhausted = False
         print(f"[TTS] Circuit breaker OpenAI: tentando novamente após {_OPENAI_CB_TTL:.0f}s.")
 
@@ -219,7 +213,6 @@ def _falar_edge_tts(texto: str, output_path: str, use_cache: bool = True) -> str
                 await communicate.save(temp_path)
                 return
 
-            # Síntese Bilíngue Nativa: divide em prefixo (PT), frase em inglês (EN nativo) e sufixo (PT)
             prefix = texto[:match.start()].strip()
             english_text = match.group(1).strip()
             suffix = texto[match.end():].strip()
@@ -236,7 +229,6 @@ def _falar_edge_tts(texto: str, output_path: str, use_cache: bool = True) -> str
             with open(temp_path, "wb") as f:
                 f.write(combined_audio)
 
-        # Sempre executa em thread dedicada para evitar conflito com o event loop do FastAPI
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(asyncio.run, _generate())
@@ -274,7 +266,7 @@ def limpar_cache_audio(max_idade_segundos: int = 3600) -> int:
     removidos = 0
     agora = time.time()
     try:
-        _PERMANENTES = {"senhor_ack.mp3"}  # áudios permanentes — nunca remover
+        _PERMANENTES = {"senhor_ack.mp3"}
         for f in os.listdir(AUDIO_CACHE_DIR):
             if f in _PERMANENTES or f.startswith("tts_"):
                 continue
@@ -298,27 +290,18 @@ def limpar_texto_para_fala(texto: str) -> str:
     """
     if not texto:
         return ""
-    # Converte links [texto](url) -> texto
     t = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', texto)
-    # Remove asteriscos de negrito e itálico (**palavra**, *palavra*, etc)
     t = re.sub(r'\*+', '', t)
-    # Remove crases de código (`codigo` ou ```bloco```)
     t = re.sub(r'`+', '', t)
-    # Remove cabeçalhos markdown (# Titulo)
     t = re.sub(r'#+\s*', '', t)
-    # Remove marcadores de lista no início de linhas (* item, - item, + item)
     t = re.sub(r'^\s*[-*+]\s+', '', t, flags=re.MULTILINE)
-    # Remove outros caracteres estranhos para voz
     t = re.sub(r'[_~>|]', ' ', t)
-    # Remove anotações como (lê-se...) ou (pronuncia-se...) para não duplicar fala
     t = re.sub(r'\(?\s*l[eê]-se\s+fra?y[i]?vis\s*\)?', '', t, flags=re.IGNORECASE)
     t = re.sub(r'\(?\s*pronuncia-se\s+fra?y[i]?vis\s*\)?', '', t, flags=re.IGNORECASE)
-    # Substitui qualquer menção ao nome da assistente por Frayvis (som fonético exato "Frái-vis")
     t = re.sub(r'\bF\.?R\.?Y\.?I\.?V\.?s\b', 'Frayvis', t, flags=re.IGNORECASE)
     t = re.sub(r'F\.R\.Y\.I\.Vs', 'Frayvis', t, flags=re.IGNORECASE)
     t = re.sub(r'FRYIVs', 'Frayvis', t, flags=re.IGNORECASE)
     t = re.sub(r'\bFryvis\b', 'Frayvis', t, flags=re.IGNORECASE)
-    # Normaliza múltiplos espaços e quebras
     t = re.sub(r'\s+', ' ', t).strip()
     return t
 
@@ -340,7 +323,6 @@ def falar(
     
     Retorna o caminho do arquivo gerado ou string vazia se indisponível.
     """
-    # Bloqueia geração de voz quando o sistema está mutado
     try:
         from core.mute_state import is_muted
         if is_muted():
@@ -356,18 +338,15 @@ def falar(
     if not texto_para_voz:
         return ""
 
-    # Em cenários multi-usuário simultâneo, gera arquivo individual para isolar sessões
     if unique_file or output_path is None:
         os.makedirs(AUDIO_CACHE_DIR, exist_ok=True)
         target_path = os.path.join(AUDIO_CACHE_DIR, f"audio_{uuid.uuid4().hex}.mp3")
     else:
         target_path = output_path
 
-    # Determina o provedor TTS configurado (.env)
     load_dotenv()
     provider = os.getenv("TTS_PROVIDER", "auto").strip().lower()
 
-    # 0. VoiceStudio (OmniVoice) — provedor premium local com clonagem de voz
     if provider == "voicestudio":
         if falar_voicestudio is not None:
             result = falar_voicestudio(texto_para_voz, target_path)
@@ -376,7 +355,6 @@ def falar(
             print("[TTS] VoiceStudio indisponivel. Verifique se o app esta rodando.")
         else:
             print("[TTS] Modulo tts_voicestudio nao encontrado.")
-        # Fallback em cascata se VoiceStudio falhar
         result = _falar_openai(texto_para_voz, target_path)
         if result:
             return result
@@ -384,15 +362,12 @@ def falar(
         if result:
             return result
 
-    # 1. Se provedor for estritamente edge, vai direto sem perda de tempo
     elif provider == "edge":
         result = _falar_edge_tts(texto_para_voz, target_path)
         if result:
             return result
 
-    # 2. Tenta OpenAI TTS (se provider não for edge nem voicestudio)
     else:
-        # Modo auto: tenta VoiceStudio primeiro se disponível e rodando
         if falar_voicestudio is not None and voicestudio_disponivel is not None:
             if voicestudio_disponivel():
                 result = falar_voicestudio(texto_para_voz, target_path)
@@ -404,7 +379,6 @@ def falar(
         if result:
             return result
 
-        # Fallback para Edge TTS se OpenAI falhar/esgotar quota
         print("[TTS] Usando fallback Edge TTS (gratuito)...")
         result = _falar_edge_tts(texto_para_voz, target_path)
         if result:

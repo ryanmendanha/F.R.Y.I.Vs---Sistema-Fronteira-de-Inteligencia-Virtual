@@ -26,7 +26,6 @@ from skills.system_controls import pesquisar_google, pesquisar_youtube
 SANDBOX = PROJECT_ROOT / "FRYIVS_TESTES" / "web"
 SANDBOX.mkdir(parents=True, exist_ok=True)
 
-# Página HTML local para testes de formulário
 HTML_LOCAL = SANDBOX / "pagina_teste.html"
 HTML_LOCAL.write_text("""<!DOCTYPE html>
 <html lang="pt-BR">
@@ -50,7 +49,6 @@ def _ok(resultado: str) -> bool:
     return isinstance(resultado, str) and len(resultado) > 2
 
 
-# ── WEB-001 ──────────────────────────────────────────────────────────────────
 def test_WEB_001_inicializar_webdriver():
     """WEB-001: Inicializar WebDriver abrindo página local."""
     resultado = navegar_para(URL_LOCAL)
@@ -58,14 +56,12 @@ def test_WEB_001_inicializar_webdriver():
     assert any(kw in resultado.lower() for kw in ["sucesso", "naveg", "aberto", "aberta"]), resultado
 
 
-# ── WEB-002 ──────────────────────────────────────────────────────────────────
 def test_WEB_002_navegar_para_url_local():
     """WEB-002: Navegar para URL do servidor local (docs FastAPI se rodando, ou página HTML)."""
     resultado = navegar_para(URL_LOCAL)
     assert _ok(resultado)
 
 
-# ── WEB-003 ──────────────────────────────────────────────────────────────────
 def test_WEB_003_ler_titulo_pagina():
     """WEB-003: Ler conteúdo da página navegada — contém título esperado."""
     navegar_para(URL_LOCAL)
@@ -75,7 +71,6 @@ def test_WEB_003_ler_titulo_pagina():
     assert any(kw in resultado.lower() for kw in ["fryivs", "teste", "página"]), resultado
 
 
-# ── WEB-004 ──────────────────────────────────────────────────────────────────
 def test_WEB_004_ler_conteudo_textual():
     """WEB-004: Ler texto da página HTML local."""
     navegar_para(URL_LOCAL)
@@ -84,7 +79,6 @@ def test_WEB_004_ler_conteudo_textual():
     assert "Conteúdo de teste" in resultado or "Página de Teste" in resultado or _ok(resultado), resultado
 
 
-# ── WEB-005 ──────────────────────────────────────────────────────────────────
 def test_WEB_005_capturar_tela_web():
     """WEB-005: Capturar screenshot da página web."""
     navegar_para(URL_LOCAL)
@@ -94,28 +88,24 @@ def test_WEB_005_capturar_tela_web():
     assert any(kw in resultado.lower() for kw in ["captura", "screenshot", "salva", ".png"]), resultado
 
 
-# ── WEB-006 ──────────────────────────────────────────────────────────────────
 def test_WEB_006_pesquisar_na_web():
     """WEB-006: Realizar pesquisa web."""
     resultado = pesquisar_na_web("inteligência artificial 2026")
     assert _ok(resultado)
 
 
-# ── WEB-007 ──────────────────────────────────────────────────────────────────
 def test_WEB_007_pesquisar_google():
     """WEB-007: Pesquisa no Google via skill de sistema."""
     resultado = pesquisar_google("python inteligência artificial")
     assert _ok(resultado)
 
 
-# ── WEB-008 ──────────────────────────────────────────────────────────────────
 def test_WEB_008_pesquisar_youtube():
     """WEB-008: Pesquisa no YouTube via skill de sistema."""
     resultado = pesquisar_youtube("tutorial python 2026")
     assert _ok(resultado)
 
 
-# ── WEB-009 ──────────────────────────────────────────────────────────────────
 def test_WEB_009_navegar_pagina_html_local():
     """WEB-009: Navegar para arquivo HTML local estático."""
     resultado = navegar_para(URL_LOCAL)
@@ -123,17 +113,14 @@ def test_WEB_009_navegar_pagina_html_local():
     time.sleep(0.5)
 
 
-# ── WEB-010 ──────────────────────────────────────────────────────────────────
 def test_WEB_010_localizar_elemento_por_id():
     """WEB-010: Localizar elemento por ID na página local."""
     navegar_para(URL_LOCAL)
     time.sleep(0.8)
     resultado = ler_conteudo_pagina()
-    # Verificar que o DOM está acessível
     assert _ok(resultado)
 
 
-# ── WEB-011 ──────────────────────────────────────────────────────────────────
 def test_WEB_011_digitar_em_campo():
     """WEB-011: Digitar texto em campo de formulário da página local."""
     navegar_para(URL_LOCAL)
@@ -142,7 +129,6 @@ def test_WEB_011_digitar_em_campo():
     assert _ok(resultado)
 
 
-# ── WEB-012 ──────────────────────────────────────────────────────────────────
 def test_WEB_012_clicar_botao():
     """WEB-012: Clicar no botão de envio da página local."""
     navegar_para(URL_LOCAL)
@@ -151,7 +137,6 @@ def test_WEB_012_clicar_botao():
     assert _ok(resultado)
 
 
-# ── WEB-013 ──────────────────────────────────────────────────────────────────
 def test_WEB_013_verificar_estado_pos_clique():
     """WEB-013: Verificar mudança de estado após clique no botão."""
     navegar_para(URL_LOCAL)
@@ -160,11 +145,9 @@ def test_WEB_013_verificar_estado_pos_clique():
     clicar_elemento_web("#btn-enviar")
     time.sleep(0.5)
     conteudo = ler_conteudo_pagina()
-    # O clique define innerText de #resultado para "OK"
     assert _ok(conteudo)
 
 
-# ── WEB-014 ──────────────────────────────────────────────────────────────────
 def test_WEB_014_rolar_pagina():
     """WEB-014: Rolar página para baixo e para cima sem erro."""
     navegar_para(URL_LOCAL)
@@ -175,21 +158,17 @@ def test_WEB_014_rolar_pagina():
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
         time.sleep(0.3)
         driver.execute_script("window.scrollTo(0, 0);")
-        assert True  # Sem exceção = PASSOU
+        assert True
     except Exception as e:
-        # Se não há driver disponível, marca como tolerado
         pytest.skip(f"WebDriver indisponível para scroll: {e}")
 
 
-# ── WEB-015 ──────────────────────────────────────────────────────────────────
 def test_WEB_015_url_inexistente_timeout_gracioso():
     """WEB-015: Navegar para URL inexistente — timeout gracioso sem loop."""
     resultado = navegar_para("http://localhost:19999/nao-existe-nunca")
     assert _ok(resultado)
-    # Não deve travar ou retornar nenhum resultado infinito
 
 
-# ── WEB-016 ──────────────────────────────────────────────────────────────────
 def test_WEB_016_clicar_seletor_inexistente():
     """WEB-016: Clicar em seletor inexistente — sem crash do processo."""
     navegar_para(URL_LOCAL)
@@ -200,7 +179,6 @@ def test_WEB_016_clicar_seletor_inexistente():
         f"Erro não amigável: {resultado}"
 
 
-# ── WEB-017 ──────────────────────────────────────────────────────────────────
 def test_WEB_017_digitar_campo_inexistente():
     """WEB-017: Digitar em campo inexistente — erro amigável sem crash."""
     navegar_para(URL_LOCAL)
@@ -209,7 +187,6 @@ def test_WEB_017_digitar_campo_inexistente():
     assert _ok(resultado)
 
 
-# ── WEB-018 ──────────────────────────────────────────────────────────────────
 def test_WEB_018_nova_aba_ou_navegacao_adicional():
     """WEB-018: Navegar para segunda URL sem fechar a primeira."""
     resultado = navegar_para(URL_LOCAL)
@@ -218,7 +195,6 @@ def test_WEB_018_nova_aba_ou_navegacao_adicional():
     assert _ok(resultado2)
 
 
-# ── WEB-019 ──────────────────────────────────────────────────────────────────
 def test_WEB_019_multiplas_navegacoes_sequenciais():
     """WEB-019: Navegação sequencial para a mesma página — sem acúmulo de drivers."""
     for _ in range(3):
@@ -227,7 +203,6 @@ def test_WEB_019_multiplas_navegacoes_sequenciais():
         time.sleep(0.3)
 
 
-# ── WEB-020 ──────────────────────────────────────────────────────────────────
 def test_WEB_020_extrair_links_da_pagina():
     """WEB-020: Extrair links da página ativa via leitura de conteúdo."""
     navegar_para(URL_LOCAL)
@@ -236,7 +211,6 @@ def test_WEB_020_extrair_links_da_pagina():
     assert _ok(conteudo)
 
 
-# ── WEB-021 ──────────────────────────────────────────────────────────────────
 def test_WEB_021_pagina_com_emojis():
     """WEB-021: Página com emojis e caracteres internacionais — sem crash."""
     html_emoji = SANDBOX / "pagina_emoji.html"
@@ -247,7 +221,6 @@ def test_WEB_021_pagina_com_emojis():
     assert _ok(resultado)
 
 
-# ── WEB-022 ──────────────────────────────────────────────────────────────────
 def test_WEB_022_captura_apos_navegacao():
     """WEB-022: Captura de tela após navegação bem-sucedida."""
     navegar_para(URL_LOCAL)
@@ -256,18 +229,14 @@ def test_WEB_022_captura_apos_navegacao():
     assert _ok(resultado)
 
 
-# ── WEB-023 ──────────────────────────────────────────────────────────────────
 def test_WEB_023_recuperacao_pos_erro():
     """WEB-023: Após erro de navegação, próxima chamada funciona normalmente."""
-    # Navega para URL inválida
     navegar_para("http://localhost:19998/errado")
     time.sleep(0.5)
-    # Tenta navegar para URL válida logo depois
     resultado = navegar_para(URL_LOCAL)
     assert _ok(resultado)
 
 
-# ── WEB-024 ──────────────────────────────────────────────────────────────────
 def test_WEB_024_fechar_navegador_graciosamente():
     """WEB-024: Fechar todas as instâncias do WebDriver sem exceção."""
     navegar_para(URL_LOCAL)
@@ -275,7 +244,6 @@ def test_WEB_024_fechar_navegador_graciosamente():
     assert _ok(resultado)
 
 
-# ── WEB-025 ──────────────────────────────────────────────────────────────────
 def test_WEB_025_sem_processos_orfaos():
     """WEB-025: Verificar que não há processos chromedriver.exe rodando após fechamento."""
     fechar_navegador()
@@ -286,12 +254,10 @@ def test_WEB_025_sem_processos_orfaos():
             ["tasklist", "/FI", "IMAGENAME eq chromedriver.exe"],
             capture_output=True, text=True, timeout=5
         )
-        # "INFO: No tasks are running..." indica que não há processos órfãos
         sem_orfaos = "chromedriver" not in r.stdout.lower() or "no tasks" in r.stdout.lower()
-        # Tolerante: se ainda houver, marca como PARCIAL via warning
         if not sem_orfaos:
             import warnings
             warnings.warn(f"WEB-025: Possíveis processos chromedriver órfãos detectados: {r.stdout[:200]}")
     except Exception:
-        pass  # tasklist indisponível — aceitar
-    assert True  # Chegou aqui sem crash = PASSOU
+        pass
+    assert True

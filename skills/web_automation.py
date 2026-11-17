@@ -33,7 +33,6 @@ except ImportError:
     WebDriverWait = None
     EC = None
 
-# webdriver-manager como fallback para resolver drivers automaticamente
 try:
     from webdriver_manager.chrome import ChromeDriverManager
     from webdriver_manager.microsoft import EdgeChromiumDriverManager
@@ -43,8 +42,6 @@ except ImportError:
     ChromeDriverManager = None
     EdgeChromiumDriverManager = None
 
-
-# ── Schemas de Parâmetros Pydantic ──────────────────────────────────────────
 
 class NavegarWebParams(BaseModel):
     url: str = Field(..., description="URL ou endereço web a ser acessado (ex: 'https://google.com' ou 'github.com')")
@@ -99,8 +96,6 @@ class CapturarTelaWebParams(BaseModel):
     )
 
 
-# ── Gerenciador Singleton de WebDriver ──────────────────────────────────────
-
 class WebAutomationManager:
     """
     Gerenciador singleton de navegador para manter a sessão aberta
@@ -137,7 +132,6 @@ class WebAutomationManager:
 
         desejado = (browser_name or "auto").lower().strip()
 
-        # Se já existe driver ativo e funcional, reutiliza a mesma janela/aba!
         if self._driver is not None:
             if desejado in ("edge", "chrome") and desejado != self._active_browser:
                 self.close()
@@ -145,14 +139,12 @@ class WebAutomationManager:
                 try:
                     handles = self._driver.window_handles
                     if handles:
-                        # Mantém o controle sempre na aba mais recente aberta pelo usuário ou link
                         self._driver.switch_to.window(handles[-1])
                         _ = self._driver.title
                         return self._driver
                 except Exception:
                     self._driver = None
 
-        # Preferência por Edge apenas se explicitamente requisitado
         tentar_edge_primeiro = (desejado == "edge")
 
         def _chrome_options() -> ChromeOptions:
@@ -161,7 +153,6 @@ class WebAutomationManager:
             opts.add_argument("--new-window")
             opts.add_argument("--disable-blink-features=AutomationControlled")
             opts.add_argument("--disable-infobars")
-            # NUNCA adicionar --headless aqui — o navegador DEVE aparecer na tela
             opts.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
             opts.add_experimental_option("useAutomationExtension", False)
             opts.add_experimental_option("detach", True)
@@ -173,7 +164,6 @@ class WebAutomationManager:
             opts.add_argument("--new-window")
             opts.add_argument("--disable-blink-features=AutomationControlled")
             opts.add_argument("--disable-infobars")
-            # NUNCA adicionar --headless aqui — o navegador DEVE aparecer na tela
             opts.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
             opts.add_experimental_option("useAutomationExtension", False)
             opts.add_experimental_option("detach", True)
@@ -259,8 +249,6 @@ def _get_driver(navegador: str = "auto") -> Any:
     return _manager.get_driver(browser_name=navegador)
 
 
-# ── Funções Executáveis da Skill ────────────────────────────────────────────
-
 def _forcar_primeiro_plano_janela(titulos: list[str] | None = None) -> None:
     """Força de forma inequívoca que a janela do navegador fique maximizada e em primeiro plano na tela do usuário."""
     if titulos is None:
@@ -287,7 +275,6 @@ def _forcar_primeiro_plano_janela(titulos: list[str] | None = None) -> None:
         import win32gui
         import win32con
 
-        # Simular tecla Alt para destravar a restrição de SetForegroundWindow do Windows
         ctypes.windll.user32.keybd_event(0x12, 0, 0, 0)
         ctypes.windll.user32.keybd_event(0x12, 0, 2, 0)
 
@@ -442,7 +429,6 @@ def navegar_para(url: str, navegador: str = "auto") -> str:
         if not url_limpa:
             return "Informe a URL ou o link que deseja abrir."
 
-        # Se o modelo/usuário passou uma referência a um link da página atual (ex.: 'primeiro link')
         if (
             not url_limpa.startswith(("http://", "https://", "file://"))
             and "." not in url_limpa
@@ -471,7 +457,6 @@ def navegar_para(url: str, navegador: str = "auto") -> str:
         _registrar_estado_web(getattr(driver, "current_url", url_limpa) or url_limpa, titulo, links)
         return f"Navegador aberto na tela em '{url_limpa}' com sucesso. Título da página: {titulo}.{_resumir_links(links)}"
     except Exception as e:
-        # Fallback nativo: abre diretamente pelo SO com janela visível e maximizada
         try:
             import subprocess
             import sys
@@ -539,7 +524,6 @@ def pesquisar_na_web(termo: str, motor: str = "google", navegador: str = "auto")
             url = f"https://www.google.com/search?q={termo_encoded}"
             origem = "Google"
 
-        # 1. Automação com Selenium na mesma aba para permitir abrir links, clicar e rolar em seguida
         try:
             driver = _manager.get_driver(browser_name=navegador)
             driver.get(url)
@@ -551,7 +535,6 @@ def pesquisar_na_web(termo: str, motor: str = "google", navegador: str = "auto")
             except Exception:
                 pass
             time.sleep(0.5)
-            # Se o Google apresentar bloqueio de tráfego automatizado (/sorry/), muda para Bing/DuckDuckGo na mesma aba
             url_atual = (getattr(driver, "current_url", "") or "").lower()
             if "google.com/sorry" in url_atual or "unusual traffic" in (getattr(driver, "page_source", "") or "")[:1500].lower():
                 url_alt = f"https://www.bing.com/search?q={termo_encoded}"
@@ -566,7 +549,6 @@ def pesquisar_na_web(termo: str, motor: str = "google", navegador: str = "auto")
         except Exception as e_sel:
             print(f"[pesquisar_na_web] Selenium teve erro ({e_sel}). Acionando abertura nativa...")
 
-        # 2. Fallback resiliente: abertura nativa no navegador especificado (visível e maximizado)
         import sys
 
         def _abrir_visivel_pesquisa(cmd: list) -> None:
@@ -626,12 +608,10 @@ def clicar_elemento_web(seletor: str | None = None, texto: str | None = None) ->
         wait = WebDriverWait(driver, 5)
         alvo_bruto = (texto or seletor or "").strip()
 
-        # 0. Se o comando for de rolagem ou histórico de página
         alvo_lower = alvo_bruto.lower()
         if any(k in alvo_lower for k in ("rolar", "role", "descer", "desça", "desca", "subir", "suba", "voltar pagina", "pagina anterior")):
             return interagir_pagina_web(acao=alvo_bruto)
 
-        # Se chamaram clicar_elemento_web("#btn-enviar") passando o texto na posição de seletor ou vice-versa
         if seletor and not texto:
             s_check = seletor.strip()
             eh_seletor_css_xpath = (
@@ -645,7 +625,6 @@ def clicar_elemento_web(seletor: str | None = None, texto: str | None = None) ->
         elemento = None
         href_direto: str | None = None
 
-        # 1. Verifica se o usuário pediu por posição ordinal ('primeiro link', 'segundo resultado', '1', etc.)
         idx_ordinal = _resolver_indice_ordinal(texto or seletor or "")
         if idx_ordinal is not None:
             links = _extrair_links_pagina(driver, max_links=12)
@@ -663,7 +642,6 @@ def clicar_elemento_web(seletor: str | None = None, texto: str | None = None) ->
                     _registrar_estado_web(getattr(driver, "current_url", url_destino), titulo_pag, novos_links)
                     return f"Link '{titulo_link}' aberto com sucesso na aba atual ({url_destino}). Título: {titulo_pag}."
 
-        # 2. Busca por seletor CSS ou XPath direto
         if seletor:
             s = seletor.strip()
             try:
@@ -672,14 +650,11 @@ def clicar_elemento_web(seletor: str | None = None, texto: str | None = None) ->
                 else:
                     elemento = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, s)))
             except Exception:
-                # Se não for um seletor válido, tenta tratar como texto visível
                 if not texto:
                     texto = s
 
-        # 3. Busca inteligente por texto visível (sem acentos/case-insensitive em links, h3, botões, inputs)
         if elemento is None and texto:
             t = texto.strip()
-            # Remove prefixos genéricos como "link ", "botão ", "site ", "abra o ", "acesse esse "
             import re
             t_limpo = re.sub(
                 r"^(abra o |abra a |abrir o |abrir a |abra esse |acesse o |acesse a |acesse esse |acessar o |acessar esse |clique no |clique na |clique em |entrar no |entre no |esse |este |link do |link da |site do |site da |link |botao |botão |site |resultado |video |vídeo )+",
@@ -688,14 +663,12 @@ def clicar_elemento_web(seletor: str | None = None, texto: str | None = None) ->
                 flags=re.IGNORECASE,
             ).strip() or t
 
-            # 3.1 Procura primeiro nos links extraídos da página atual ou da última pesquisa
             links_atuais = _manager.ultimos_links or _extrair_links_pagina(driver, max_links=15)
             for l in links_atuais:
                 if t_limpo.lower() in l.get("texto", "").lower() or t_limpo.lower() in l.get("url", "").lower():
                     href_direto = l.get("url")
                     break
 
-            # 3.2 Busca no DOM ao vivo (suporta acentos e qualquer elemento clicável)
             js_find = """
             const query = (arguments[0] || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase().trim();
             if (!query) return null;
@@ -785,7 +758,6 @@ def clicar_elemento_web(seletor: str | None = None, texto: str | None = None) ->
 def digitar_campo_web(texto: str, seletor: str | None = None, submeter: bool = True) -> str:
     """Digita texto em um campo de entrada ou barra de pesquisa na página web atual."""
     try:
-        # Compatibilidade caso os argumentos venham invertidos: digitar_campo_web("#campo", "Texto")
         if seletor and texto and texto.strip().startswith(("#", ".", "//", "[")) and not seletor.strip().startswith(("#", ".", "//", "[")):
             texto, seletor = seletor, texto
 
@@ -800,7 +772,6 @@ def digitar_campo_web(texto: str, seletor: str | None = None, submeter: bool = T
             else:
                 campo = wait.until(EC.visibility_of_element_to_be_clickable((By.CSS_SELECTOR, s)))
         else:
-            # Verifica se o elemento em foco já é um campo editável; senão busca a caixa de busca/input principal da página
             try:
                 ativo = driver.switch_to.active_element
                 tag = (ativo.tag_name or "").lower() if ativo else ""
@@ -920,10 +891,8 @@ def ler_conteudo_pagina(seletor: str | None = None, max_caracteres: int = 1200) 
             elemento = driver.find_element(By.CSS_SELECTOR, seletor)
             texto_puro = elemento.text or ""
         else:
-            # Pega o corpo principal
             texto_puro = driver.find_element(By.TAG_NAME, "body").text or ""
 
-        # Limpeza de excesso de espaços e quebras
         linhas = [linha.strip() for linha in texto_puro.splitlines() if linha.strip()]
         conteudo = " ".join(linhas)
 
@@ -969,8 +938,6 @@ def fechar_navegador() -> str:
     except Exception as e:
         return f"Erro ao fechar o navegador web: {e}"
 
-
-# ── Schemas OpenAPI / JSON Schema para Ollama & Gemini ───────────────────────
 
 WEB_TOOLS_SCHEMAS: Final[list[dict[str, Any]]] = [
     {

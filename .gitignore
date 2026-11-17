@@ -1,4 +1,3 @@
-# Segredos, Certificados e Variáveis de Ambiente
 .env
 .env.*
 !.env.example
@@ -8,13 +7,11 @@
 credentials*.json
 client_secret*.json
 
-# Ambientes Virtuais e Dependências
 venv/
 .venv/
 env/
 node_modules/
 
-# Caches e Compilações
 __pycache__/
 *.pyc
 *.pyo
@@ -24,7 +21,6 @@ GPTCache/
 .coverage
 htmlcov/
 
-# Mídias e Arquivos Gerados
 audio_cache/
 vozes_resposta/
 screenshots/
@@ -38,7 +34,6 @@ screenshots/
 序y*
 MSO*.acl
 
-# Bancos de Dados Locais, Estado de Sessão e Dados de Usuário
 fryvis_memory/
 test_db_a/
 test_db_b/
@@ -51,7 +46,6 @@ data/gptcache_map.txt
 data/overlay_state.json
 data/scheduled_jobs.json
 
-# Repositórios clonados, subprojetos externos e grafos gerados
 repositorios-github/
 VoiceStudio/
 graphify-out/

@@ -51,24 +51,19 @@ def test_voice_daemon_descarta_chunks_quando_mutado():
         usar_openwakeword=False,
     )
 
-    # Cria áudio artificial com energia
     chunk_fala = np.full(1600, 0.5, dtype=np.float32)
 
-    # 1. Mutar o daemon
     daemon.set_muted(True)
     assert mute_state.is_muted()
     assert daemon.estado == "DORMINDO"
     assert any(n.get("type") == "mic_muted" and n.get("muted") is True for n in notificacoes)
 
-    # 2. Injeta múltiplos chunks de fala — devem ser 100% descartados
     for _ in range(10):
         daemon.processar_chunk(chunk_fala)
 
-    # O estado deve permanecer rigorosamente DORMINDO e nenhuma captura iniciada
     assert daemon.estado == "DORMINDO"
     assert len(daemon._chunks_fala) == 0
 
-    # 3. Desmutar o daemon
     daemon.set_muted(False)
     assert not mute_state.is_muted()
     assert any(n.get("type") == "mic_muted" and n.get("muted") is False for n in notificacoes)
@@ -77,23 +72,19 @@ def test_voice_daemon_descarta_chunks_quando_mutado():
 def test_api_mute_endpoints():
     client = TestClient(server.app)
 
-    # 1. Mutar via POST
     res = client.post("/api/voice/mute", json={"muted": True})
     assert res.status_code == 200
     assert mute_state.is_muted()
 
-    # 2. Consultar status via GET /api/voice/mute
     res_get = client.get("/api/voice/mute")
     assert res_get.status_code == 200
     assert res_get.json().get("muted") is True
 
-    # 3. Consultar via /api/status
     res_status = client.get("/api/status")
     assert res_status.status_code == 200
     data = res_status.json()
     assert data.get("mic_muted") is True
 
-    # 4. Desmutar via POST
     res_unmute = client.post("/api/voice/mute", json={"muted": False})
     assert res_unmute.status_code == 200
     assert not mute_state.is_muted()

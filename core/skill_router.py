@@ -19,7 +19,6 @@ def _sem_acentos(texto: str) -> str:
     """Remove acentuação preservando caracteres ASCII minúsculos."""
     return unicodedata.normalize("NFD", texto).encode("ascii", "ignore").decode("ascii")
 
-# Metadados e gatilhos semânticos enriquecidos em português e inglês para cada skill
 SKILL_SEMANTIC_PROFILES: Final[dict[str, dict[str, str]]] = {
     "abrir_programa": {
         "description": "Abre um programa, software, aplicativo ou utilitário no computador pelo nome ou apelido.",
@@ -128,7 +127,6 @@ SKILL_SEMANTIC_PROFILES: Final[dict[str, dict[str, str]]] = {
             "bloquear tela bloquear pc travar tela trancar computador lock screen bloquear computador"
         )
     },
-    # ── Automação Web Avançada (Selenium) ───────────────────────────────────
     "navegar_para": {
         "description": "Acessa um site ou endereço web diretamente no navegador (ex: 'youtube.com', 'google.com', 'globo.com').",
         "intents": (
@@ -186,7 +184,6 @@ SKILL_SEMANTIC_PROFILES: Final[dict[str, dict[str, str]]] = {
             "fechar navegador encerrar browser fechar chrome fechar internet fechar pagina web close browser"
         )
     },
-    # ── Visão Computacional e OCR ──────────────────────────────────────────
     "localizar_e_clicar_imagem": {
         "description": "Localiza visualmente um botão ou ícone na tela usando OpenCV e clica nele.",
         "intents": (
@@ -201,7 +198,6 @@ SKILL_SEMANTIC_PROFILES: Final[dict[str, dict[str, str]]] = {
             "extrair texto da imagem ler tela ler palavras na tela screen ocr read screen text"
         )
     },
-    # ── Arquivos e Planilhas ────────────────────────────────────────────────
     "gerenciar_arquivos": {
         "description": "Copia, move, deleta, cria pastas ou lista arquivos no computador usando Pathlib e Shutil.",
         "intents": (
@@ -238,7 +234,6 @@ SKILL_SEMANTIC_PROFILES: Final[dict[str, dict[str, str]]] = {
             "adicionar coluna remover coluna inserir dados na planilha edit spreadsheet update row"
         )
     },
-    # ── Documentos Word (.docx) ─────────────────────────────────────────────
     "criar_documento_word": {
         "description": "Cria um novo documento Microsoft Word (.docx) formatado com título, subtítulo, parágrafos e seções, abrindo-o em segundo plano.",
         "intents": (
@@ -267,7 +262,6 @@ SKILL_SEMANTIC_PROFILES: Final[dict[str, dict[str, str]]] = {
             "mostrar documento no word open word document launch word"
         )
     },
-    # ── Agendamento e Notificações ──────────────────────────────────────────
     "agendar_execucao": {
         "description": "Agenda uma tarefa ou alarme no robô com a biblioteca schedule.",
         "intents": (
@@ -327,7 +321,6 @@ SKILL_SEMANTIC_PROFILES: Final[dict[str, dict[str, str]]] = {
 }
 
 
-# Palavras-chave de alta precisão para recuperação instantânea (BM25 / Keyword boost)
 SKILL_KEYWORD_RULES: Final[dict[str, list[str]]] = {
     "abrir_programa": [
         "abrir", "abre", "abra", "iniciar", "inicie", "executar", "execute", "lancar", "lanca",
@@ -417,7 +410,6 @@ SKILL_KEYWORD_RULES: Final[dict[str, list[str]]] = {
         "acesse no chrome", "acesse no edge", "acessar no chrome", "acessar no edge",
     ],
     "pesquisar_na_web": [
-        # Automação Web interativa via Selenium
         "automacao web", "automação web", "navegacao com selenium", "interagir no site"
     ],
     "clicar_elemento_web": [
@@ -535,8 +527,6 @@ SKILL_KEYWORD_RULES: Final[dict[str, list[str]]] = {
 }
 
 
-# ── Normalizador Fonético (Whisper) & Coloquial e Guardas de Segurança ────────
-
 _SUBSTITUICOES_FONETICAS: Final[tuple[tuple[str, str], ...]] = (
     ("ex sel", "excel"),
     ("ec sel", "excel"),
@@ -629,7 +619,6 @@ def eh_comando_vago_ou_perigoso(query: str) -> tuple[bool, str]:
     if not q:
         return False, ""
 
-    # 1. Fechar tudo indiscriminadamente
     if any(p in q for p in (
         "fecha tudo", "feche tudo", "fechar tudo", "mata tudo", "encerrar tudo",
         "encerra tudo", "fecha todas as janelas", "feche todas as janelas", "apaga tudo",
@@ -641,7 +630,6 @@ def eh_comando_vago_ou_perigoso(query: str) -> tuple[bool, str]:
             "Informe especificamente qual janela ou arquivo deseja fechar ou remover."
         )
 
-    # 2. Exclusão vaga sem alvo ("apaga isso", "deleta isso", "exclui isso")
     if any(p in q for p in (
         "apaga isso", "apague isso", "deleta isso", "delete isso",
         "exclui isso", "exclua isso", "remove isso", "remova isso", "joga isso fora"
@@ -650,7 +638,6 @@ def eh_comando_vago_ou_perigoso(query: str) -> tuple[bool, str]:
             "Por segurança, senhor, especifique exatamente o nome do arquivo, linha ou item que deseja remover."
         )
 
-    # 3. Envio externo vago ("manda isso pro Discord / WhatsApp" sem conteúdo/webhook explícito)
     if any(p in q for p in (
         "manda isso pro discord", "envia isso pro discord", "posta isso no discord",
         "joga isso no discord", "manda isso no discord", "manda isso pro whatsapp",
@@ -660,7 +647,6 @@ def eh_comando_vago_ou_perigoso(query: str) -> tuple[bool, str]:
             "Senhor, para enviar um alerta externo preciso saber a mensagem exata e a URL do webhook de destino."
         )
 
-    # 4. Comando puramente vago sem ação/objeto ("manda ver", "faz aí", "pode fazer")
     if q in (
         "manda ver", "manda bala", "faz ai", "faz aí", "executa ai", "executa aí",
         "pode fazer", "arrocha", "vai fundo", "faz isso", "faca isso", "faça isso"
@@ -689,7 +675,6 @@ def eh_consulta_memoria_ou_rag(query: str) -> bool:
     return any(g in q for g in gatilhos_mem_rag)
 
 
-
 class SkillRouter:
     """Gerenciador de roteamento e busca semântica de skills no ChromaDB."""
 
@@ -704,8 +689,6 @@ class SkillRouter:
             for schema in ALL_SKILL_SCHEMAS
             if "function" in schema
         }
-        # NOTA: ensure_skills_indexed() é chamado explicitamente pelo lifespan do servidor.
-        # Não chamamos aqui para evitar indexação dupla desnecessaria no startup.
 
     def ensure_skills_indexed(self, force: bool = False) -> None:
         """
@@ -764,7 +747,6 @@ class SkillRouter:
         if not query or not query.strip():
             return []
 
-        # Bloqueia comandos vagos/perigosos ou perguntas puras de Memória/RAG
         bloqueado, _ = eh_comando_vago_ou_perigoso(query)
         if bloqueado or eh_consulta_memoria_ou_rag(query):
             return []
@@ -773,7 +755,6 @@ class SkillRouter:
         matched_names: list[str] = []
         _weak_question_starters = ("o que e", "como funciona")
 
-        # 1. Recuperação Híbrida: Detecção léxica/keyword direta (100% de precisão nos gatilhos)
         for skill_name, triggers in SKILL_KEYWORD_RULES.items():
             for trigger in triggers:
                 trig_norm = _sem_acentos(trigger)
@@ -786,15 +767,10 @@ class SkillRouter:
                         matched_names.append(skill_name)
                     break
 
-        # Se `abrir_programa` entrou apenas porque um nome de app/substantivo apareceu junto de uma
-        # ação mais específica (ex.: fechar/minimizar/focar/maximizar janela, atalho, navegador, agendamento),
-        # remove `abrir_programa` da frente.
         if "abrir_programa" in matched_names and len(matched_names) > 1:
             matched_names.remove("abrir_programa")
 
-        # ── Priorização Inteligente de Intenções Compostas ────────────────────────────────────
 
-        # Caso 0: Perguntas sobre Código / Grafo de Conhecimento (Graphify)
         _is_expl_grafo = any(k in q_lower for k in (
             "explica o modulo", "explique o modulo", "explicar modulo", "explique modulo",
             "detalhe o modulo", "detalhar modulo", "anatomia da funcao", "dependencias da funcao",
@@ -837,7 +813,6 @@ class SkillRouter:
             ]
             return matched_schemas[:top_k]
 
-        # Caso 0.5: Ações específicas de Sistema, Visão/OCR, Arquivos, Agendador e Navegador Direto
         _is_fechar_nav = any(k in q_lower for k in (
             "fechar navegador", "feche o navegador", "fecha o navegador",
             "fechar browser", "feche o browser", "fecha o browser", "encerrar navegador", "feche a internet",
@@ -880,7 +855,6 @@ class SkillRouter:
             "listar agendamentos", "tarefas agendadas", "quais agendamentos", "agendamentos estao programados",
         ))
 
-        # Caso 1: Pesquisa com navegador explícito (Chrome ou Edge em segundo plano)
         _browser_suffixes = (" no edge", " no chrome", " no microsoft edge", " no google chrome", " no navegador", " no google")
         _browser_search_triggers = (
             "pesquise no edge", "pesquise no chrome", "pesquisar no edge", "pesquisar no chrome",
@@ -907,14 +881,12 @@ class SkillRouter:
             )
         )
         if _is_browser_search:
-            # Usuário pediu expressamente Chrome ou Edge -> abre no navegador Co-Piloto e inclui ferramentas de navegação na aba
             for ws_extra in ("clicar_elemento_web", "interagir_pagina_web", "navegar_para"):
                 if ws_extra not in matched_names:
                     matched_names.append(ws_extra)
             if "pesquisar_google" in matched_names:
                 matched_names.remove("pesquisar_google")
             matched_names.insert(0, "pesquisar_google")
-            # Remove falsos positivos para não abrir app genérico nem acionar pesquisa apenas em chat
             if "abrir_programa" in matched_names:
                 matched_names.remove("abrir_programa")
             if "pesquisar_na_web" in matched_names:
@@ -922,8 +894,6 @@ class SkillRouter:
             if "pesquisar_informacao_web" in matched_names:
                 matched_names.remove("pesquisar_informacao_web")
 
-        # Caso 1.1: Pesquisa geral / Dúvida na Web SEM pedir para abrir navegador
-        # O usuário quer apenas a resposta no chat sem abrir Chrome ou Edge
         _web_info_triggers = (
             "pesquise sobre", "pesquisar sobre", "pesquisa sobre", "busque sobre", "buscar sobre",
             "procure sobre", "procurar sobre", "o que e ", "quem e ", "quem foi",
@@ -956,12 +926,10 @@ class SkillRouter:
             if "pesquisar_informacao_web" in matched_names:
                 matched_names.remove("pesquisar_informacao_web")
             matched_names.insert(0, "pesquisar_informacao_web")
-            # Remove qualquer intenção de abrir navegador para que nenhuma janela seja aberta
             for falso_pos in ("pesquisar_google", "pesquisar_na_web", "abrir_programa", "obter_hora_data"):
                 if falso_pos in matched_names:
                     matched_names.remove(falso_pos)
 
-        # Caso 2: YouTube explícito → skill nativa (sem Selenium overhead)
         _is_youtube = any(k in q_lower for k in (
             "youtube", "tocar musica", "toca musica", "ouvir musica",
             "busca video", "busque video", "buscar video", "procure video", "procurar video"
@@ -969,11 +937,9 @@ class SkillRouter:
         if _is_youtube and not _is_browser_search and not _is_nav_direta:
             if "pesquisar_youtube" not in matched_names:
                 matched_names.insert(0, "pesquisar_youtube")
-            # Remove Selenium da fila pois youtube já tem skill nativa mais rápida
             if "pesquisar_na_web" in matched_names and not _is_browser_search:
                 matched_names.remove("pesquisar_na_web")
 
-        # Caso 3: Interação direta com a aba do navegador (abrir link/resultado, clicar, rolar, voltar)
         _click_triggers = (
             "primeiro link", "segundo link", "terceiro link", "quarto link", "quinto link", "ultimo link",
             "primeiro resultado", "segundo resultado", "terceiro resultado",
@@ -1050,7 +1016,6 @@ class SkillRouter:
                 if remover in matched_names:
                     matched_names.remove(remover)
 
-        # Caso 4: Planilha/Excel → skills de dados (sem conflitar com abrir_programa ou gerenciar_arquivos)
         if _is_arquivos:
             if "gerenciar_arquivos" in matched_names:
                 matched_names.remove("gerenciar_arquivos")
@@ -1060,7 +1025,6 @@ class SkillRouter:
             and any(k in q_lower for k in ("planilha", "excel", "tabela", ".csv", "arquivo csv", "criar excel", "abrir excel", "abrir planilha"))
         )
         if _is_planilha:
-            # Determinar qual skill de planilha priorizar
             _criacao_triggers = (
                 "criar planilha", "crie uma planilha", "crie planilha", "cria planilha", "cria uma planilha",
                 "gerar planilha", "gere uma planilha", "fazer planilha", "faca uma planilha", "faz uma planilha",
@@ -1101,7 +1065,6 @@ class SkillRouter:
             if "abrir_programa" in matched_names:
                 matched_names.remove("abrir_programa")
 
-        # Caso 4.1: Documento Word (.docx) → skills de Word (sem conflitar com abrir_programa)
         _is_word = any(k in q_lower for k in ("word", ".docx", "documento word", "arquivo docx"))
         if _is_word and not _is_planilha:
             _word_criacao = any(v in q_lower for v in ("crie", "criar", "cria", "gere", "gerar", "gera", "monte", "monta", "faca", "faz", "novo documento", "escreva um documento", "escreve um documento"))
@@ -1126,7 +1089,6 @@ class SkillRouter:
             if "abrir_programa" in matched_names:
                 matched_names.remove("abrir_programa")
 
-        # Caso 5: Continuação contextual sobre o artefato ativo em segundo plano (Modo Supercomputador)
         if threshold > 0.35:
             try:
                 from core.session_state import obter_artefato
@@ -1189,7 +1151,6 @@ class SkillRouter:
                     ):
                         matched_names.remove("abrir_programa")
 
-        # 2. Busca Semântica Densa Vetorial (ChromaDB HNSW Cosseno)
         try:
             total = self.collection.count()
             if total > 0:
@@ -1204,7 +1165,6 @@ class SkillRouter:
                 metadatas_list = results.get("metadatas", [[]])[0]
 
                 for dist, meta in zip(distances_list, metadatas_list):
-                    # Distância cosseno: valores menores indicam maior proximidade
                     if dist <= threshold:
                         skill_name = meta.get("name")
                         if not skill_name:
@@ -1218,7 +1178,6 @@ class SkillRouter:
         except Exception as e:
             print(f"[SkillRouter] Erro na busca semântica de skills: {e}")
 
-        # 3. Monta a lista de schemas retornados respeitando top_k
         matched_schemas = [
             self._schemas_by_name[name]
             for name in matched_names

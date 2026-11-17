@@ -25,42 +25,31 @@ from unittest.mock import MagicMock, patch, AsyncMock
 import pytest
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 1. TTS — circuit breaker com TTL
-# ─────────────────────────────────────────────────────────────────────────────
-
 class TestTTSCircuitBreaker:
     def setup_method(self):
         import core.tts as tts_mod
-        # Reset estado do circuit breaker antes de cada teste
         tts_mod._openai_quota_exhausted = False
         tts_mod._openai_quota_exhausted_at = 0.0
 
     def test_circuit_breaker_bloqueado_dentro_ttl(self):
         import core.tts as tts_mod
         tts_mod._openai_quota_exhausted = True
-        tts_mod._openai_quota_exhausted_at = time.time()  # fechou agora
+        tts_mod._openai_quota_exhausted_at = time.time()
         result = tts_mod._falar_openai("teste", "/tmp/nao_cria.mp3")
         assert result == "", "Deve retornar vazio quando CB fechado dentro do TTL"
 
     def test_circuit_breaker_abre_apos_ttl(self, tmp_path):
         import core.tts as tts_mod
         tts_mod._openai_quota_exhausted = True
-        # Simula TTL já expirado (fechou há muito tempo)
         tts_mod._openai_quota_exhausted_at = time.time() - tts_mod._OPENAI_CB_TTL - 1
 
         out = tmp_path / "audio.mp3"
-        # Mock requests.post para retornar 200 com bytes mínimos
         import io
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.iter_content = lambda chunk_size: [b"\x00" * 100]
         with patch("core.tts.requests.post", return_value=mock_resp):
-            # Após TTL: deve tentar e resetar flag
             tts_mod._falar_openai("oi", str(out))
-        # Flag deve ter sido resetada antes da chamada de rede
-        # (pode ter sido refechada se request simulou erro, mas o reset aconteceu)
-        # Verificamos apenas que passou pelo reset (não bloqueou antes de tentar)
         assert not tts_mod._openai_quota_exhausted or tts_mod._openai_quota_exhausted_at > 0
 
     def test_circuit_breaker_fecha_em_401(self, tmp_path):
@@ -78,15 +67,12 @@ class TestTTSCircuitBreaker:
     def test_senhor_ack_protegido_da_limpeza(self, tmp_path):
         """senhor_ack.mp3 não deve ser removido pela limpeza periódica."""
         import core.tts as tts_mod
-        # Cria diretório temporário simulando audio_cache
         fake_cache = tmp_path / "audio_cache"
         fake_cache.mkdir()
         protegido = fake_cache / "senhor_ack.mp3"
         protegido.write_bytes(b"\x00" * 10)
-        # Arquivo expirado normal
         expirado = fake_cache / "resp_old.mp3"
         expirado.write_bytes(b"\x00" * 10)
-        # Recua mtime para simular arquivo antigo
         old_time = time.time() - 7200
         os.utime(str(protegido), (old_time, old_time))
         os.utime(str(expirado), (old_time, old_time))
@@ -99,20 +85,12 @@ class TestTTSCircuitBreaker:
         assert removidos == 1
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 2. STT — lock do Whisper (smoke de importação e existência do lock)
-# ─────────────────────────────────────────────────────────────────────────────
-
 def test_stt_whisper_lock_existe():
     import core.stt as stt_mod
     assert hasattr(stt_mod, "_whisper_lock"), "_whisper_lock deve existir em core.stt"
     assert isinstance(stt_mod._whisper_lock, type(threading.Lock()).__class__) or \
            hasattr(stt_mod._whisper_lock, "acquire"), "_whisper_lock deve ser um Lock"
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 3. Gemini — turno user duplicado não deve causar 400
-# ─────────────────────────────────────────────────────────────────────────────
 
 class TestGeminiRaceCondition:
     def _get_format_fn(self):
@@ -139,31 +117,23 @@ class TestGeminiRaceCondition:
         """Se histórico termina em user, o novo turno não deve criar par user+user."""
         import core.gemini_client as gc
 
-        # Simula histórico que termina em user (malformado)
         hist_malformado = [
             {"role": "user", "content": "cmd anterior"},
         ]
         contents = gc._format_history_for_gemini(hist_malformado)
 
-        # Aplica a mesma lógica do ask_gemini: remove duplicado antes de adicionar
         if contents and contents[-1].get("role") == "user":
             contents.pop()
         contents.append({"role": "user", "parts": [{"text": "novo cmd"}]})
 
         roles = [c["role"] for c in contents]
-        # Não deve haver dois "user" consecutivos
         for i in range(len(roles) - 1):
             assert not (roles[i] == "user" and roles[i+1] == "user"), \
                 f"user+user consecutivos em posições {i},{i+1}: {roles}"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 4. Scheduler — parsing, persistência, payload adaptativo
-# ─────────────────────────────────────────────────────────────────────────────
-
 class TestScheduler:
     def setup_method(self):
-        # Reset estado do módulo
         import skills.scheduler_ops as sch
         sch._jobs_registry.clear()
         sch._scheduler_running = False
@@ -191,7 +161,6 @@ class TestScheduler:
             sch._salvar_jobs()
             assert fake_jobs_file.exists(), "Arquivo deve ser criado"
 
-            # Agora carrega
             sch._jobs_registry = []
             sch._carregar_jobs()
             assert len(sch._jobs_registry) == 1
@@ -202,14 +171,12 @@ class TestScheduler:
         fake_file = tmp_path / "bad.json"
         fake_file.write_text("{não é json válido}", encoding="utf-8")
         with patch.object(sch, "_JOBS_FILE", fake_file):
-            sch._carregar_jobs()  # Não deve lançar exceção
-        # Registry permanece como estava
+            sch._carregar_jobs()
         assert isinstance(sch._jobs_registry, list)
 
     def test_payload_discord(self):
         import skills.scheduler_ops as sch
         url = "https://discord.com/api/webhooks/123/abc"
-        # Simula lógica de seleção de payload
         url_lower = url.lower()
         if "discord.com/api/webhooks" in url_lower:
             payload = {"content": "teste", "username": "F.R.Y.I.Vs"}
@@ -236,10 +203,6 @@ class TestScheduler:
             payload = {}
         assert "text" in payload
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 5. Server — broadcast remove socket morto + endpoint /api/audio/{id}
-# ─────────────────────────────────────────────────────────────────────────────
 
 class TestServerBroadcast:
     def test_broadcast_remove_conexao_morta(self):
@@ -269,11 +232,9 @@ class TestAudioEndpoint:
         import server
         from starlette.testclient import TestClient
         with patch("os.path.exists", return_value=False):
-            # Só garante que a rota está registrada e retorna 404 corretamente
             client = TestClient(server.app, raise_server_exceptions=False)
-            # Não inicializa lifespan completo — testa apenas a rota
             resp = client.get("/api/audio/last")
-            assert resp.status_code in (404, 422, 500)  # sem arquivo real → 404 ou erro de startup
+            assert resp.status_code in (404, 422, 500)
 
     def test_audio_by_id_rejeita_path_traversal(self):
         """request_id com caracteres especiais deve retornar 400."""
@@ -281,7 +242,6 @@ class TestAudioEndpoint:
         from starlette.testclient import TestClient
         client = TestClient(server.app, raise_server_exceptions=False)
         resp = client.get("/api/audio/../etc/passwd")
-        # FastAPI vai decodificar o path — o endpoint deve rejeitar
         assert resp.status_code in (400, 404, 422)
 
     def test_audio_by_id_valido_404_sem_arquivo(self, tmp_path):
@@ -293,10 +253,6 @@ class TestAudioEndpoint:
             resp = client.get(f"/api/audio/{uuid.uuid4().hex}")
             assert resp.status_code in (404, 500)
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 6. VoiceDaemon — cooldown half-duplex + acumulador de interrupção
-# ─────────────────────────────────────────────────────────────────────────────
 
 class TestVoiceDaemonHalfduplex:
     def _make_daemon(self, tocando=False):
@@ -316,13 +272,10 @@ class TestVoiceDaemonHalfduplex:
         import numpy as np
         from core.stt import CHUNK_SIZE
         d = self._make_daemon(tocando=False)
-        # Simula que reprodução terminou agora
         d._silenciar_ate = time.time() + 0.4
-        # Estado era DORMINDO — frame com energia alta chegou logo após
         chunk = np.ones(CHUNK_SIZE, dtype="float32") * 0.3
         estado_antes = d.estado
         d.processar_chunk(chunk)
-        # Não deve ter iniciado captura (frame descartado pelo cooldown)
         assert not d._fala_iniciada, "Frame não deve iniciar captura durante cooldown"
         assert d.estado == estado_antes, "Estado não deve mudar durante cooldown"
 
@@ -332,7 +285,7 @@ class TestVoiceDaemonHalfduplex:
         from core.stt import CHUNK_SIZE
         d = self._make_daemon(tocando=False)
         d._stop_chunks = [np.zeros(CHUNK_SIZE, dtype="float32")] * 3
-        d._silenciar_ate = 0.0  # cooldown já expirou
+        d._silenciar_ate = 0.0
         chunk = np.zeros(CHUNK_SIZE, dtype="float32")
         d.processar_chunk(chunk)
         assert d._stop_chunks == [], "_stop_chunks deve ser limpo ao sair da reprodução"
@@ -366,11 +319,10 @@ class TestVoiceDaemonHalfduplex:
             transcrever_wake_fn=lambda a: "",
             usar_openwakeword=False,
         )
-        # _transcrever_interrupcao é o atributo que _verificar_interrupcao usa — substituir diretamente
         d._transcrever_interrupcao = lambda a: "pare"
         d.limiar_rms = 0.01
         d._stop_chunks = [np.ones(1600, dtype="float32") * 0.1] * 3
         with patch("core.audio_player.parar", side_effect=lambda: parar_chamado.append(1)):
-            with patch("core.voice_daemon._event_loop", None):  # evita run_coroutine_threadsafe
+            with patch("core.voice_daemon._event_loop", None):
                 d._verificar_interrupcao()
         assert parar_chamado, "audio_player.parar() deve ser chamado ao detectar 'pare'"

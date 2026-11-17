@@ -1,16 +1,3 @@
-/**
- * OrbitalHUDVisual.ts
- *
- * Motor Three.js para o modo visual "Orbital HUD" do AIOrb.
- * Renderiza:
- *   1. Esfera central densa de partículas (star-core) com gradiente magenta→violeta→ciano e flare base
- *   2. Três anéis orbitais concêntricos inclinados com segmentos tracejados animados (HUD cibernético)
- *   3. Nós satélite (pequenos pontos luminosos) em órbita ao longo dos anéis
- *
- * Padrão de design:
- *   - Exporta função de fábrica `createOrbitalHUDScene` que recebe a cena e retorna um disposer+updater.
- *   - Responsabilidade única: Three.js puro, sem lógica de React ou DOM.
- */
 
 import * as THREE from "three";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
@@ -22,9 +9,6 @@ import {
 } from "./orbShadersHUD";
 import type { AIOrbConfig, AIOrbState } from "./types";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Configuração padrão do modo HUD
-// ─────────────────────────────────────────────────────────────────────────────
 export const DEFAULT_HUD_CONFIG: AIOrbConfig = {
   particleCount: 14000,
   particleCountMobile: 7000,
@@ -69,11 +53,6 @@ export const DEFAULT_HUD_CONFIG: AIOrbConfig = {
   },
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers: geometria do anel segmentado
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** Cria um anel de pontos ao longo de uma circunferência em 3D com atributo aProgress */
 function buildRingGeometry(radius: number, segments: number): THREE.BufferGeometry {
   const geo = new THREE.BufferGeometry();
   const positions = new Float32Array(segments * 3);
@@ -93,7 +72,6 @@ function buildRingGeometry(radius: number, segments: number): THREE.BufferGeomet
   return geo;
 }
 
-/** Cria nós satélite (esferas muito pequenas) ao longo da órbita de um anel */
 function buildSatelliteNodes(
   radius: number,
   count: number,
@@ -117,16 +95,9 @@ function buildSatelliteNodes(
   return nodes;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Fábrica principal
-// ─────────────────────────────────────────────────────────────────────────────
-
 export interface HUDSceneHandles {
-  /** Chamado a cada frame com delta e estado atual */
   update: (delta: number, state: AIOrbState, audioLevel: number) => void;
-  /** Libera todos os recursos Three.js */
   dispose: () => void;
-  /** Instância do composer para renderizar */
   composer: EffectComposer;
 }
 
@@ -140,14 +111,12 @@ export function createOrbitalHUDScene(
 ): HUDSceneHandles {
   const particleTotal = isMobile ? cfg.particleCountMobile : cfg.particleCount;
 
-  // ── Cena + Câmera ──
   const scene  = new THREE.Scene();
   scene.background = new THREE.Color(0x000000);
 
   const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
   camera.position.z = 8.0;
 
-  // ── Renderer ──
   const renderer = new THREE.WebGLRenderer({
     powerPreference: "high-performance",
     antialias:       false,
@@ -159,7 +128,6 @@ export function createOrbitalHUDScene(
   renderer.toneMappingExposure = 1.1;
   container.appendChild(renderer.domElement);
 
-  // ── Composer + Bloom ──
   const composer   = new EffectComposer(renderer);
   const renderPass = new RenderPass(scene, camera);
   composer.addPass(renderPass);
@@ -172,7 +140,6 @@ export function createOrbitalHUDScene(
   );
   composer.addPass(bloomPass);
 
-  // ── 1. ESFERA CENTRAL DE PARTÍCULAS ──────────────────────────────────
   const geoSphere = new THREE.BufferGeometry();
   const positions  = new Float32Array(particleTotal * 3);
   const randoms    = new Float32Array(particleTotal);
@@ -230,8 +197,6 @@ export function createOrbitalHUDScene(
   const spherePoints = new THREE.Points(geoSphere, matSphere);
   scene.add(spherePoints);
 
-  // ── 2. ANÉIS ORBITAIS CONCÊNTRICOS HUD ────────────────────────────────
-  // Paleta dos anéis
   const ringColors = {
     outer: new THREE.Color(cfg.colors.royalBlue),   // anel externo: azul/ciano
     mid:   new THREE.Color(cfg.colors.violet),       // anel médio: violeta
@@ -254,7 +219,6 @@ export function createOrbitalHUDScene(
 
   const ringDefs: RingDef[] = [
     {
-      // Anel externo maior — azul neon, inclinado ~25°, mais espaçado
       radius:   1.78,
       tilt:     { x: 0.44, y: 0.0, z: 0.18 },
       color:    ringColors.outer,
@@ -268,7 +232,6 @@ export function createOrbitalHUDScene(
       opacity:  0.75,
     },
     {
-      // Anel médio — violeta, inclinado diferente para cruzar o orbe
       radius:   1.52,
       tilt:     { x: -0.28, y: 0.15, z: 0.55 },
       color:    ringColors.mid,
@@ -282,7 +245,6 @@ export function createOrbitalHUDScene(
       opacity:  0.65,
     },
     {
-      // Anel interno — magenta fino, rotação mais rápida
       radius:   1.34,
       tilt:     { x: 0.70, y: -0.10, z: 0.30 },
       color:    ringColors.inner,
@@ -304,13 +266,11 @@ export function createOrbitalHUDScene(
     rotAxis:   THREE.Vector3;
     rotSpeed:  number;
     nodeObjs:  THREE.Mesh[];
-    // ângulos acumulados dos nós para rastrear posição
     nodeAngles: number[];
     ringRadius: number;
   }
 
   const rings: RingInstance[] = ringDefs.map((def) => {
-    // Uniforms do anel
     const ringUniforms = {
       uRingColor: { value: def.color.clone() },
       uAlpha:     { value: def.opacity },
@@ -364,7 +324,6 @@ export function createOrbitalHUDScene(
     group.rotation.z = def.tilt.z;
     group.add(lineLoop);
 
-    // Nós satélite
     const nodeObjs = buildSatelliteNodes(def.radius, def.nodes, def.color, 0.028);
     const nodeAngles: number[] = [];
     nodeObjs.forEach((node, idx) => {
@@ -387,7 +346,6 @@ export function createOrbitalHUDScene(
     };
   });
 
-  // ── Anim state (lerp suave) ──────────────────────────────────────────
   const animState = {
     currentRotSpeed:    cfg.rotationSpeed.idle,
     currentNoiseSpeed:  cfg.noiseSpeed.idle,
@@ -401,7 +359,6 @@ export function createOrbitalHUDScene(
 
   const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
-  // ── ResizeObserver ───────────────────────────────────────────────────
   const resizeObserver = new ResizeObserver((entries) => {
     for (const entry of entries) {
       const w = Math.max(10, Math.floor(entry.contentRect.width));
@@ -415,7 +372,6 @@ export function createOrbitalHUDScene(
   });
   resizeObserver.observe(container);
 
-  // ── update() ─────────────────────────────────────────────────────────
   function update(delta: number, state: AIOrbState, audioLevel: number): void {
     const lerpSpeed = Math.min(delta * 5.0, 1.0);
 
@@ -436,7 +392,6 @@ export function createOrbitalHUDScene(
     animState.currentAccentMix     = lerp(animState.currentAccentMix, targetAccentMix, lerpSpeed);
     animState.currentAccentColor.lerp(animState.targetAccentColor, lerpSpeed);
 
-    // Sphere uniforms
     uniforms.uTime.value         += delta;
     uniforms.uNoiseSpeed.value    = animState.currentNoiseSpeed;
     uniforms.uNoiseStrength.value = animState.currentNoiseStrength;
@@ -447,14 +402,12 @@ export function createOrbitalHUDScene(
     animState.lightAngleAcc += delta * (animState.currentRotSpeed * 1.3 + animState.currentAudioLevel * 0.4);
     uniforms.uLightAngle.value = animState.lightAngleAcc;
 
-    // Sphere rotation
     if (!prefersReducedMotion) {
       spherePoints.rotation.y += delta * animState.currentRotSpeed * 0.55;
       spherePoints.rotation.x  = Math.sin(uniforms.uTime.value * 0.32) * 0.10;
       spherePoints.rotation.z  = Math.cos(uniforms.uTime.value * 0.22) * 0.08;
     }
 
-    // Rings update
     rings.forEach((ring, rIdx) => {
       const baseSpeed = ringDefs[rIdx].rotSpeed;
       const speed = baseSpeed * (1.0 + animState.currentAudioLevel * 0.6);
@@ -463,18 +416,15 @@ export function createOrbitalHUDScene(
         ring.group.rotateOnAxis(ring.rotAxis, delta * speed * 0.65);
       }
 
-      // Offset de dash animado
       ring.uniforms.uOffset.value = (ring.uniforms.uOffset.value + delta * speed * 0.12) % 1.0;
       ring.uniforms.uAudioLevel.value = animState.currentAudioLevel;
 
-      // Pulso de opacidade ao falar/thinking
       const baseOpacity = ringDefs[rIdx].opacity;
       const pulse = (state === "speaking" || state === "thinking")
         ? baseOpacity * (0.85 + 0.2 * Math.sin(uniforms.uTime.value * 3.5 + rIdx * 1.2))
         : baseOpacity;
       ring.uniforms.uAlpha.value = pulse;
 
-      // Nós satélite seguem o anel
       ring.nodeAngles.forEach((angle, nIdx) => {
         const newAngle = angle + delta * speed * ringDefs[rIdx].rotSpeed * 0.9;
         ring.nodeAngles[nIdx] = newAngle;
@@ -490,7 +440,6 @@ export function createOrbitalHUDScene(
     composer.render();
   }
 
-  // ── dispose() ─────────────────────────────────────────────────────────
   function dispose(): void {
     resizeObserver.disconnect();
     geoSphere.dispose();

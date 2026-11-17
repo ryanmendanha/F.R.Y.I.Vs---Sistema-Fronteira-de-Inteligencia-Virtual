@@ -58,11 +58,9 @@ class TestOpenWakeWordEngine:
         detector = OpenWakeWordDetector(threshold=0.55)
         rng = np.random.default_rng(123)
 
-        # Silêncio puro
         ok_sil, score_sil = detector.detectar_em_segmento(np.zeros(SAMPLE_RATE, dtype=np.float32))
         assert not ok_sil and score_sil < 0.25
 
-        # Ruído branco/ambiente em diferentes amplitudes
         for amp in (0.005, 0.02, 0.05):
             ruido = rng.normal(0.0, amp, SAMPLE_RATE).astype(np.float32)
             ok_r, score_r = detector.detectar_em_segmento(ruido)
@@ -87,7 +85,6 @@ class TestOpenWakeWordEngine:
         audio = decode_audio(str(VOZ_M4A), sampling_rate=SAMPLE_RATE).astype(np.float32)
         seg_voz = extrair_segmentos_voz_m4a(audio)[0]
 
-        # Pre-roll de silêncio + segmento real da voz do usuário + silêncio pós-fala
         stream_audio = np.concatenate([
             np.zeros(CHUNK_SIZE * 5, dtype=np.float32),
             seg_voz,
@@ -99,7 +96,6 @@ class TestOpenWakeWordEngine:
         assert len(senhor_tocado) == 1
         assert daemon.estado == "OUVINDO_PEDIDO"
 
-        # Agora envia o comando de voz com o microfone ativo em OUVINDO_PEDIDO
         for _ in range(6):
             daemon.processar_chunk(np.full(CHUNK_SIZE, 0.15, dtype=np.float32))
         for _ in range(8):

@@ -12,15 +12,10 @@ import unittest
 from typing import Any
 from unittest.mock import MagicMock, patch, call
 
-# Garante que o diretório raiz do projeto esteja no path
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  TESTS: skills/open_app.py – normalize_app_name & resolve_program_name
-# ─────────────────────────────────────────────────────────────────────────────
 
 class TestNormalizeAppName(unittest.TestCase):
     """Testa normalização de nomes com acentos, separadores e extensões."""
@@ -100,10 +95,6 @@ class TestResolveProgramName(unittest.TestCase):
         self.assertIsInstance(result, str)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  TESTS: skills/open_app.py – abrir_programa (com mock de os.startfile)
-# ─────────────────────────────────────────────────────────────────────────────
-
 class TestAbrirPrograma(unittest.TestCase):
     """Testa a função de abertura de programas com mock do sistema operacional."""
 
@@ -149,10 +140,6 @@ class TestAbrirPrograma(unittest.TestCase):
         mock_popen.assert_called_once_with([r"C:\tools\mytool.exe"], shell=False)
         self.assertIn("sucesso", result.lower())
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  TESTS: skills/system_controls.py – _parse_keys
-# ─────────────────────────────────────────────────────────────────────────────
 
 class TestParseKeys(unittest.TestCase):
     """Testa normalização de atalhos de teclado em variados formatos."""
@@ -237,7 +224,6 @@ class TestControlarVolume(unittest.TestCase):
     def test_mutar_volume(self, mock_pag):
         result = self.controlar("mutar")
         mock_pag.press.assert_called_once_with("volumemute")
-        # A mensagem retornada é "mutado/desmutado com sucesso"
         self.assertTrue(
             "mutado" in result.lower() or "mute" in result.lower(),
             f"Esperava 'mutado' ou 'mute' em: {result!r}"
@@ -273,7 +259,7 @@ class TestDigitarTexto(unittest.TestCase):
         result = self.digitar("Olá Mundo")
         mock_pag.write.assert_called_once_with("Olá Mundo", interval=0.03)
         self.assertIn("sucesso", result.lower())
-        self.assertIn("9", result)  # 9 caracteres
+        self.assertIn("9", result)
 
     @patch("skills.system_controls.pyautogui")
     @patch("skills.system_controls.time.sleep")
@@ -315,10 +301,6 @@ class TestListarJanelas(unittest.TestCase):
         self.assertIn("Erro", result)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  TESTS: skills/__init__.py – execute_skill
-# ─────────────────────────────────────────────────────────────────────────────
-
 class TestExecuteSkill(unittest.TestCase):
     """Testa o despachante central de skills."""
 
@@ -357,10 +339,6 @@ class TestExecuteSkill(unittest.TestCase):
         self.assertIn("Erro", result)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  TESTS: core/skill_router.py – SkillRouter
-# ─────────────────────────────────────────────────────────────────────────────
-
 class TestSkillRouter(unittest.TestCase):
     """Testa o roteamento semântico de skills via ChromaDB."""
 
@@ -395,7 +373,6 @@ class TestSkillRouter(unittest.TestCase):
 
     def test_semantic_search_finds_notepad(self):
         router = self._build_router()
-        # Query com vocabulário enriquecido garante hit semântico alto
         results = router.search_relevant_skills(
             "abrir programa bloco de notas notepad iniciar aplicativo",
             top_k=3,
@@ -420,7 +397,6 @@ class TestSkillRouter(unittest.TestCase):
         """Perguntas sem intenção de skill clara devem retornar pouco ou nada com threshold baixo."""
         router = self._build_router()
         results = router.search_relevant_skills("O que é o universo?", top_k=2, threshold=0.30)
-        # A consulta é filosófica; com threshold restrito, deve retornar vazio
         self.assertEqual(len(results), 0, f"Skills inesperadas retornadas: {results}")
 
     def test_returns_valid_schemas(self):
@@ -442,10 +418,6 @@ class TestSkillRouter(unittest.TestCase):
         all_skills = router.get_all_skills()
         self.assertGreater(len(all_skills), 0)
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  TESTS: core/memory.py – salvar, buscar e deletar
-# ─────────────────────────────────────────────────────────────────────────────
 
 class TestMemory(unittest.TestCase):
     """Testa persistência semântica de memória com ChromaDB ephemeral."""
@@ -521,10 +493,6 @@ class TestMemory(unittest.TestCase):
         self.assertEqual(lista, [])
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  TESTS: core/vector_db.py – get_or_create_collection cache
-# ─────────────────────────────────────────────────────────────────────────────
-
 class TestVectorDB(unittest.TestCase):
     """Testa o gerenciador Multiton do ChromaDB."""
 
@@ -550,30 +518,22 @@ class TestVectorDB(unittest.TestCase):
         client_a = get_chroma_client("test_db_a")
         client_b = get_chroma_client("test_db_b")
 
-        # Não deve ignorar silenciosamente o segundo db_path
         self.assertNotEqual(client_a, client_b)
         self.assertEqual(mock_client_cls.call_count, 2)
 
-        # Chamar novamente com o mesmo path deve retornar do cache multiton sem recriar
         client_a_cached = get_chroma_client("test_db_a")
         self.assertEqual(client_a, client_a_cached)
         self.assertEqual(mock_client_cls.call_count, 2)
 
-        # Reset por caminho
         reset_chroma_client("test_db_a")
         norm_a = os.path.abspath(os.path.normpath("test_db_a"))
         norm_b = os.path.abspath(os.path.normpath("test_db_b"))
         self.assertNotIn(norm_a, _CHROMA_CLIENTS)
         self.assertIn(norm_b, _CHROMA_CLIENTS)
 
-        # Reset global
         reset_chroma_client()
         self.assertEqual(len(_CHROMA_CLIENTS), 0)
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  TESTS: TirarScreenshot
-# ─────────────────────────────────────────────────────────────────────────────
 
 class TestTirarScreenshot(unittest.TestCase):
     """Testa captura de tela com mock de pyautogui e sistema de arquivos."""

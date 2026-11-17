@@ -75,7 +75,6 @@ class TestRespostasCache:
         assert "emoções" in res["resposta"].lower()
 
     def test_comandos_de_acao_e_consultas_dinamicas_sao_rejeitados_pelo_cache(self):
-        # Comandos de automação e consultas dinâmicas NUNCA devem bater no cache de conversa
         assert buscar_resposta_cache("abre a calculadora") is None
         assert buscar_resposta_cache("crie uma pasta no desktop") is None
         assert buscar_resposta_cache("feche a janela do chrome") is None
@@ -84,7 +83,6 @@ class TestRespostasCache:
         assert buscar_resposta_cache("bloqueia a tela para mim") is None
         assert buscar_resposta_cache("cria um relatório no word") is None
 
-        # Consultas de data e hora devem SEMPRE ir para a skill obter_hora_data
         assert buscar_resposta_cache("que horas são") is None
         assert buscar_resposta_cache("me diga que horas são") is None
         assert buscar_resposta_cache("que dia é hoje") is None
@@ -116,7 +114,6 @@ class TestPipelineIntegration:
                 use_memory=False,
             )
 
-            # ask_fryvis NÃO deve ter sido chamado, pois veio do cache pré-indexado!
             mock_ask.assert_not_called()
             assert resultado["from_cache"] is True
             assert "FRYIVS" in resultado["response"]
@@ -140,7 +137,6 @@ class TestPipelineIntegration:
                 use_memory=False,
             )
 
-            # Como não está no cache pré-indexado, deve chamar o LLM normalmente
             mock_ask.assert_called_once()
             assert resultado["from_cache"] is False
             assert resultado["response"] == "Aqui está sua resposta gerada."

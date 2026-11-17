@@ -4,8 +4,6 @@ from core.llm import ask_fryvis
 from core.memory import salvar_memoria, buscar_contexto
 from core.stt import gravar_audio, transcrever
 from core.tts import falar
-# FIX: usa roteamento semântico (SkillRouter) em vez de injetar ALL_SKILL_SCHEMAS direto
-# para evitar overhead de tokens e alucinações do LLM no modo terminal
 
 def loop():
     print("=" * 55)
@@ -31,7 +29,7 @@ def loop():
             resposta, ferramentas = ask_fryvis(
                 texto_usuario,
                 context=contexto,
-                enable_semantic_skill_routing=True  # FIX: roteamento semântico via SkillRouter
+                enable_semantic_skill_routing=True
             )
             
             if ferramentas:

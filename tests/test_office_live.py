@@ -34,7 +34,6 @@ class TestOfficeLiveAndCoPilot:
         assert os.path.exists(bak1)
         assert Path(bak1).read_bytes() == b"conteudo-original-v1"
 
-        # Modifica o arquivo original; segundo backup na mesma sessão não deve sobrescrever o .bak original
         arq.write_bytes(b"conteudo-modificado-v2")
         bak2 = garantir_backup_sessao(str(arq))
         assert bak2 == bak1
@@ -51,12 +50,10 @@ class TestOfficeLiveAndCoPilot:
         assert "sucesso" in res_criacao.lower() or "criada" in res_criacao.lower()
         assert os.path.exists(caminho)
 
-        # Verifica que o artefato ativo foi registrado na sessão
         art = session_state.obter_artefato("excel")
         assert art is not None
         assert os.path.abspath(art["caminho"]) == os.path.abspath(caminho)
 
-        # Edição incremental usando caminho_arquivo="atual" (como quando o usuário fala no chat/voz "adicione uma linha...")
         res_edicao = editar_planilha(
             caminho_arquivo="atual",
             acao="adicionar_linha",
@@ -87,7 +84,6 @@ class TestOfficeLiveAndCoPilot:
         assert "sucesso" in res_criacao.lower()
         assert os.path.exists(caminho)
 
-        # Edição incremental usando caminho_arquivo="atual"
         res_edicao = editar_documento_word(
             caminho_arquivo="atual",
             adicionar_titulo="Conclusão",

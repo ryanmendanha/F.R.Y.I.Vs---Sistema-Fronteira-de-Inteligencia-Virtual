@@ -131,9 +131,6 @@ function resolveBackground(
   return typeof background === "function" ? background(mode) : background;
 }
 
-// Verbatim content of particle-drift.html (self-contained hero markup + canvas particle script),
-// re-encoded as a template literal (backslash / backtick / ${ occurrences escaped) so it can be
-// embedded without a Vite `?raw` loader. Rendered inside a sandboxed iframe via srcDoc.
 const PARTICLE_DRIFT_SOURCE = `<!doctype html>
 <html lang="en">
 <head>
@@ -240,7 +237,6 @@ const PARTICLE_DRIFT_SOURCE = `<!doctype html>
         document.addEventListener("DOMContentLoaded", () => {
             gsap.registerPlugin(ScrollTrigger);
 
-            // --- ASCII Particle System Implementation ---
             const canvas = document.getElementById('particle-canvas');
             const ctx = canvas.getContext('2d');
 
@@ -293,7 +289,6 @@ const PARTICLE_DRIFT_SOURCE = `<!doctype html>
             function draw() {
                 ctx.clearRect(0, 0, width, height);
 
-                // 1. Upward Beams (Fast)
                 beams.forEach(b => {
                     b.y -= b.speed;
                     if (b.y + b.length < 0) {
@@ -311,12 +306,10 @@ const PARTICLE_DRIFT_SOURCE = `<!doctype html>
                     ctx.stroke();
                 });
 
-                // 2. Interactive Nodes (ASCII)
                 ctx.font = '12px monospace';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 
-                // Proximity Lines
                 ctx.lineWidth = 0.5;
                 for(let i = 0; i < nodes.length; i++) {
                     let n1 = nodes[i];
@@ -342,10 +335,8 @@ const PARTICLE_DRIFT_SOURCE = `<!doctype html>
 
                     let dist = Math.hypot(mouse.x - n.x, mouse.y - n.y);
 
-                    // Dynamic Character Swap
                     if (dist < 180 || Math.random() > 0.98) n.char = chars[Math.floor(Math.random() * chars.length)];
 
-                    // Mouse Connection
                     if (dist < 180) {
                         ctx.strokeStyle = \`rgba(96, 165, 250, \${0.5 * (1 - dist/180)})\`;
                         ctx.beginPath(); 
@@ -362,10 +353,8 @@ const PARTICLE_DRIFT_SOURCE = `<!doctype html>
             }
             draw();
 
-            // --- GSAP Timeline Reveals ---
             const heading = document.getElementById('hero-heading');
             
-            // Staggered vertical masked word setup
             const words = heading.innerHTML.trim().split(/(<br\\s*\\/?>|\\s+)/).filter(w => w.trim().length > 0 || w.toLowerCase().includes('<br'));
             let newHTML = '';
             words.forEach(word => {
@@ -402,10 +391,8 @@ const PARTICLE_DRIFT_SOURCE = `<!doctype html>
                 ease: "power3.out"
             }, 0.6);
 
-            // Canvas Timeline Integration
             tl.to(canvas, { opacity: 1, duration: 2, ease: "power2.inOut" }, 0.2);
 
-            // Floating Logic independent 3D shifts
             gsap.to('#floating-card', {
                 y: "-=12",
                 rotationX: 4,
@@ -638,7 +625,6 @@ export default function ParticleDrift({
   const safeSaturation = clamp(saturation, 0, 2);
   const safeBrightness = clamp(brightness, 0.35, 1.65);
 
-  // Rebuild when baked geometry/mode knobs change. Speed/opacity stay live via postMessage + time wrap.
   const source = useMemo(
     () =>
       buildFocusedDocument(PARTICLE_DRIFT_DEFINITION, {

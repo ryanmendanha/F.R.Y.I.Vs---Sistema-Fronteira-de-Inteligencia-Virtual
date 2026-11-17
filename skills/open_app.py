@@ -13,16 +13,13 @@ import unicodedata
 from typing import Final
 from pydantic import BaseModel, Field
 
-# Mapeamento extensivo de apelidos em português/inglês para executáveis do Windows
 WINDOWS_APP_ALIASES: Final[dict[str, str]] = {
-    # Editores de texto e notas
     "bloco de notas": "notepad.exe",
     "bloco de nota": "notepad.exe",
     "notepad": "notepad.exe",
     "notas": "notepad.exe",
     "wordpad": "wordpad.exe",
 
-    # Utilidades do Windows
     "calculadora": "calc.exe",
     "calc": "calc.exe",
     "explorador de arquivos": "explorer.exe",
@@ -40,7 +37,6 @@ WINDOWS_APP_ALIASES: Final[dict[str, str]] = {
     "painel de controle": "control.exe",
     "painel de controles": "control.exe",
 
-    # Terminais e Linha de Comando
     "prompt de comando": "cmd.exe",
     "prompt": "cmd.exe",
     "cmd": "cmd.exe",
@@ -48,7 +44,6 @@ WINDOWS_APP_ALIASES: Final[dict[str, str]] = {
     "windows terminal": "wt.exe",
     "powershell": "powershell.exe",
 
-    # Navegadores
     "navegador": "chrome.exe",
     "chrome": "chrome.exe",
     "google chrome": "chrome.exe",
@@ -58,7 +53,6 @@ WINDOWS_APP_ALIASES: Final[dict[str, str]] = {
     "brave": "brave.exe",
     "opera": "opera.exe",
 
-    # Produtividade & Desenvolvimento
     "vscode": "code",
     "visual studio code": "code",
     "code": "code",
@@ -70,7 +64,6 @@ WINDOWS_APP_ALIASES: Final[dict[str, str]] = {
     "paint": "mspaint.exe",
     "mspaint": "mspaint.exe",
 
-    # Mídia e Comunicação
     "spotify": "spotify.exe",
     "discord": "discord.exe",
     "whatsapp": "whatsapp.exe",
@@ -96,7 +89,6 @@ WINDOWS_APP_ALIASES: Final[dict[str, str]] = {
     "visual studio": "devenv.exe",
 }
 
-# Caminhos absolutos conhecidos e verificados no Windows para execução garantida
 _KNOWN_WINDOWS_PATHS: Final[dict[str, list[str]]] = {
     "chrome": [
         r"C:\Program Files\Google\Chrome\Application\chrome.exe",
@@ -178,17 +170,14 @@ def normalize_app_name(name: str) -> str:
     """
     clean = name.strip().lower()
     
-    # Remove extensão .exe para busca no dicionário de apelidos
     if clean.endswith(".exe"):
         clean = clean[:-4].strip()
 
-    # Remove acentuação (ex: 'configurações' -> 'configuracoes')
     clean = "".join(
         c for c in unicodedata.normalize("NFKD", clean)
         if not unicodedata.combining(c)
     )
 
-    # Substitui separadores comuns por espaços
     clean = clean.replace("_", " ").replace("-", " ")
     return " ".join(clean.split())
 
@@ -200,17 +189,14 @@ def resolve_program_name(nome_programa: str) -> str:
     """
     raw_clean = nome_programa.strip().lower()
 
-    # 1. Checa se é um dos aplicativos principais com caminhos absolutos conhecidos
     for chave, caminhos in _KNOWN_WINDOWS_PATHS.items():
         if chave in raw_clean or normalize_app_name(nome_programa) == chave:
             for c in caminhos:
                 if os.path.exists(c):
                     return c
     
-    # 2. Busca exata direta no dicionário de apelidos
     if raw_clean in WINDOWS_APP_ALIASES:
         alvo = WINDOWS_APP_ALIASES[raw_clean]
-        # Se for edge, chrome ou excel, tenta caminho absoluto
         for chave, caminhos in _KNOWN_WINDOWS_PATHS.items():
             if chave in alvo.lower():
                 for c in caminhos:
@@ -218,7 +204,6 @@ def resolve_program_name(nome_programa: str) -> str:
                         return c
         return alvo
 
-    # 3. Busca pelo nome normalizado
     norm_name = normalize_app_name(nome_programa)
     if norm_name in WINDOWS_APP_ALIASES:
         alvo = WINDOWS_APP_ALIASES[norm_name]
@@ -229,11 +214,9 @@ def resolve_program_name(nome_programa: str) -> str:
                         return c
         return alvo
 
-    # 4. Se for um caminho de arquivo existente, preserva
     if os.path.exists(nome_programa):
         return nome_programa
 
-    # 5. Caso contrário, mantém o nome original limpo
     return nome_programa.strip()
 
 
@@ -248,22 +231,17 @@ def abrir_programa(nome_programa: str, argumentos: str | None = None) -> str:
     raw_lower = nome_programa.lower().strip()
     arg_lower = (argumentos or "").lower().strip()
 
-    # ── Correção de Inversão de Parâmetros (ex: nome='g1', argumentos='edge') ──
-    # Se o argumento for um navegador e o nome for um site/termo, inverte os papéis
     if any(b in arg_lower for b in ("edge", "chrome", "msedge", "navegador", "browser")) and not any(b in raw_lower for b in ("edge", "chrome", "msedge", "navegador", "browser")):
         navegador_escolhido = arg_lower
         site_ou_termo = nome_programa.strip()
         url = site_ou_termo if site_ou_termo.startswith(("http://", "https://")) else (f"https://www.{site_ou_termo}.com.br" if "." not in site_ou_termo else f"https://{site_ou_termo}")
         return abrir_programa(navegador_escolhido, url)
 
-    # Se o nome do programa for diretamente uma URL ou site conhecido sem ser executável (ex: 'g1', 'youtube', 'globo')
     if ("." in raw_lower or raw_lower in ("g1", "youtube", "globo", "google", "uol", "noticias")) and not raw_lower.endswith(".exe"):
         url = raw_lower if raw_lower.startswith(("http://", "https://")) else (f"https://{raw_lower}.globo.com" if raw_lower == "g1" else f"https://www.{raw_lower}.com.br")
         nav_padrao = "edge" if "edge" in arg_lower else "chrome"
         return abrir_programa(nav_padrao, url)
 
-    # ── Interceptor Inteligente para Comandos Compostos (ex: "edge e pesquise X") ──
-    # Se o modelo ou usuário passou uma intenção de busca embutida no nome do programa
     if any(k in raw_lower for k in ("pesquise", "pesquisar", "procure", "busque")):
         import urllib.parse
         termo = raw_lower
@@ -285,7 +263,6 @@ def abrir_programa(nome_programa: str, argumentos: str | None = None) -> str:
                     pass
             url = f"https://www.google.com/search?q={urllib.parse.quote_plus(termo)}"
             
-            # Detecta preferência de navegador e abre janela visível em primeiro plano
             if "edge" in raw_lower:
                 for c in _KNOWN_WINDOWS_PATHS["edge"]:
                     if os.path.exists(c):
@@ -299,7 +276,6 @@ def abrir_programa(nome_programa: str, argumentos: str | None = None) -> str:
                         _ativar_janela_navegador(["Google Chrome", "Chrome"])
                         return f"O Google Chrome foi aberto na tela com a pesquisa por '{termo}'."
 
-            # Fallback para navegador padrão com janela visível
             for c in _KNOWN_WINDOWS_PATHS["edge"] + _KNOWN_WINDOWS_PATHS["chrome"]:
                 if os.path.exists(c):
                     _abrir_processo_visivel([c, "--new-window", "--start-maximized", url])
@@ -312,9 +288,7 @@ def abrir_programa(nome_programa: str, argumentos: str | None = None) -> str:
 
     alvo = resolve_program_name(nome_programa)
 
-    # Tratamento no Windows
     if sys.platform == "win32":
-        # Se for navegador (Chrome / Edge), abre via WebAutomationManager (Selenium) para que a aba seja 100% controlável
         is_browser = any(b in raw_lower or b in alvo.lower() for b in ("chrome", "msedge", "edge", "navegador"))
         if is_browser:
             from core.overlay import _em_teste
@@ -332,7 +306,6 @@ def abrir_programa(nome_programa: str, argumentos: str | None = None) -> str:
                 _ativar_janela_navegador(["Google Chrome", "Microsoft Edge", "Chrome", "Edge"])
                 return f"O navegador '{nome_programa}' foi aberto visivelmente na tela para navegar com você."
 
-        # Se for um executável com caminho absoluto já resolvido, usa subprocess.Popen para garantir janela visível
         if os.path.isabs(alvo) and os.path.exists(alvo):
             try:
                 cmd = [alvo]
@@ -343,16 +316,13 @@ def abrir_programa(nome_programa: str, argumentos: str | None = None) -> str:
             except Exception as e_abs:
                 print(f"[abrir_programa] Erro no caminho absoluto ({e_abs}). Tentando os.startfile...")
 
-        # 1. Tentar os.startfile (método nativo ideal para Windows)
         try:
             if argumentos:
-                # Com argumentos, usa subprocess.Popen
                 subprocess.Popen([alvo, argumentos])
             else:
                 os.startfile(alvo)
             return f"O aplicativo '{nome_programa}' foi aberto com sucesso."
         except Exception as e_startfile:
-            # Se for wt.exe (Windows Terminal) e não estiver instalado, fallback para powershell
             if alvo == "wt.exe":
                 try:
                     os.startfile("powershell.exe")
@@ -360,7 +330,6 @@ def abrir_programa(nome_programa: str, argumentos: str | None = None) -> str:
                 except Exception:
                     pass
 
-            # 2. Tentar encontrar executável via shutil.which
             cmd_path = shutil.which(alvo)
             if cmd_path:
                 try:
@@ -372,7 +341,6 @@ def abrir_programa(nome_programa: str, argumentos: str | None = None) -> str:
                 except Exception as e_popen:
                     return f"Erro ao iniciar '{cmd_path}': {e_popen}"
 
-            # 3. Fallback: subprocess com shell=True
             try:
                 cmd_str = f'"{alvo}" {argumentos}' if argumentos else f'"{alvo}"'
                 subprocess.Popen(cmd_str, shell=True)
@@ -383,7 +351,6 @@ def abrir_programa(nome_programa: str, argumentos: str | None = None) -> str:
                     f"[WinError] O sistema não encontrou o aplicativo. Erros: {e_startfile} / {e_shell}"
                 )
 
-    # Sistemas não-Windows (Linux / macOS)
     try:
         cmd_open = ["open" if sys.platform == "darwin" else "xdg-open", alvo]
         if argumentos:
@@ -394,7 +361,6 @@ def abrir_programa(nome_programa: str, argumentos: str | None = None) -> str:
         return f"Erro ao abrir {nome_programa}: {e}"
 
 
-# Esquema OpenAPI / JSON Schema para o Ollama
 SKILL_SCHEMA: Final[dict[str, object]] = {
     "type": "function",
     "function": {

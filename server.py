@@ -24,12 +24,11 @@ import sys
 sys.dont_write_bytecode = True
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 
-# Desativa QuickEdit Mode do Windows Console para impedir que cliques congelem o processo do servidor
 if sys.platform == "win32":
     try:
         import ctypes
         kernel32 = ctypes.windll.kernel32
-        h_stdin = kernel32.GetStdHandle(-10)  # STD_INPUT_HANDLE = -10
+        h_stdin = kernel32.GetStdHandle(-10)
         mode = ctypes.c_ulong()
         if kernel32.GetConsoleMode(h_stdin, ctypes.byref(mode)):
             ENABLE_QUICK_EDIT_MODE = 0x0040
@@ -56,9 +55,6 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-# ── Autenticação local opcional ───────────────────────────────────────────
-# Configure FRYIVS_API_TOKEN=<token> no .env ou variável de ambiente.
-# Sem token configurado → modo dev: todos os endpoints ficam liberados.
 _API_TOKEN: str = os.getenv("FRYIVS_API_TOKEN", "")
 
 
@@ -67,7 +63,7 @@ def _verificar_token(authorization: str = Header(default="")) -> None:
     Se FRYIVS_API_TOKEN não estiver configurado, a verificação é ignorada (modo dev).
     """
     if not _API_TOKEN:
-        return  # modo dev — sem autenticação configurada
+        return
     partes = authorization.split(" ", 1)
     token_recebido = partes[1] if len(partes) == 2 and partes[0].lower() == "bearer" else ""
     if not hmac.compare_digest(
@@ -90,7 +86,6 @@ from skills import ALL_SKILL_SCHEMAS, SKILLS_REGISTRY, execute_skill
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Aquece o roteador de skills, memória, base de conhecimento e o modelo Ollama no startup."""
-    # 1. Indexar skills no ChromaDB
     try:
         router = get_skill_router()
         router.ensure_skills_indexed()
@@ -98,7 +93,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[Startup] Aviso ao inicializar banco vetorial: {e}")
 
-    # 2. Indexar base de conhecimento (incremental — só indexa arquivos novos)
     try:
         novos = kb_indexar(forcar=False, verbose=True)
         info = kb_status()
@@ -106,8 +100,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[Startup] Aviso ao indexar base de conhecimento: {e}")
 
-    # 3. Warm-up do modelo Ollama — carrega o modelo na memória e mantém com keep_alive=-1
-    # Isso elimina o cold-start de 8-27s que ocorre quando o modelo é descarregado entre sessões.
     try:
         import requests as _req
         _req.post(
@@ -119,7 +111,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[Startup] Aviso: não foi possível aquecer o modelo Ollama: {e}")
 
-    # 4. Barra flutuante superior da FRYIVS (aparece só durante ações, fora da aba da FRYIVS)
     try:
         from core.overlay import iniciar_overlay
         iniciar_overlay()
@@ -127,7 +118,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[Startup] Aviso: barra flutuante indisponível: {e}")
 
-    # 5. Daemon de Escuta Contínua e Wake Word ("FRYIVS / Fraives / Frives")
     try:
         from core import voice_daemon
         loop_atual = asyncio.get_running_loop()
@@ -151,8 +141,6 @@ async def lifespan(app: FastAPI):
         parar_overlay()
     except Exception:
         pass
-    # Shutdown cleanup (se necessário)
-
 
 
 app = FastAPI(
@@ -162,7 +150,6 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Configuração de CORS para requisições locais e WebSockets
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -171,7 +158,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Montagem de arquivos estáticos da interface web
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "ui", "static")
 if os.path.exists(STATIC_DIR):
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -195,7 +181,6 @@ class ConnectionManager:
             try:
                 await connection.send_json(message)
             except Exception:
-                # Remove conexão morta para evitar vazamento de memória
                 if connection in self.active_connections:
                     self.active_connections.remove(connection)
 
@@ -203,7 +188,6 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
-# Modelos Pydantic para validação estrita
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="Mensagem de texto do usuário")
     use_memory: bool = Field(default=True, description="Se deve consultar e persistir memória semântica")
@@ -216,9 +200,6 @@ class ChatRequest(BaseModel):
 class SkillExecuteRequest(BaseModel):
     skill: str = Field(..., description="Nome da skill a ser executada")
     arguments: dict[str, Any] = Field(default_factory=dict, description="Argumentos da skill")
-
-
-
 
 
 @app.get("/")
@@ -303,7 +284,6 @@ def get_system_status() -> dict[str, Any]:
     }
 
 
-# Frases de reconhecimento ao receber um comando
 _FRASES_ANALISANDO = [
     "Analisando comando, senhor.",
     "Recebido, senhor. Processando agora.",
@@ -312,7 +292,6 @@ _FRASES_ANALISANDO = [
     "Certo, senhor. Analisando sua solicitação.",
 ]
 
-# Frases de erro variadas
 _FRASES_ERRO = [
     "Protocolo falhou, senhor. Não consegui processar sua solicitação.",
     "Desculpe, senhor. Ocorreu uma falha no sistema durante a execução.",
@@ -539,7 +518,6 @@ def get_audio_by_id(request_id: str) -> Any:
     raise HTTPException(status_code=404, detail="Áudio não encontrado.")
 
 
-# ── Tela ao vivo (MJPEG) ─────────────────────────────────────────────────────
 def _capturar_frame_jpeg(largura_max: int = 1280, qualidade: int = 60) -> bytes | None:
     """Captura a tela do usuário e retorna um frame JPEG reduzido (ou None se indisponível)."""
     try:
@@ -652,8 +630,6 @@ async def direct_execute_skill(req: SkillExecuteRequest, _auth: None = Depends(_
     return {"skill": req.skill, "result": resultado}
 
 
-# ── Base de Conhecimento ────────────────────────────────────────────────────
-
 @app.get("/api/knowledge/status")
 def knowledge_status() -> dict[str, Any]:
     """Retorna o estado da base de conhecimento indexada no ChromaDB."""
@@ -695,7 +671,6 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(default=""
     Autenticação opcional via query param: ws://host/ws?token=<FRYIVS_API_TOKEN>
     Sem FRYIVS_API_TOKEN configurado → conexão aceita (modo dev).
     """
-    # Validação de token para WebSocket (headers não disponíveis no handshake WS)
     if _API_TOKEN:
         if not hmac.compare_digest(token.encode("utf-8"), _API_TOKEN.encode("utf-8")):
             await websocket.close(code=4401)
@@ -715,7 +690,6 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(default=""
             elif event_type == "chat":
                 msg = data.get("message", "")
                 await websocket.send_json({"type": "state_change", "state": "thinking"})
-                # FIX BUG CRÍTICO: usar run_in_executor para não bloquear o event loop
                 from core.assistant_pipeline import processar_comando
                 result = await processar_comando(
                     texto=msg, origem="websocket", generate_speech=False,

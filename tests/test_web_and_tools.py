@@ -41,18 +41,15 @@ def test_schemas_validity():
 
 
 def test_gerenciar_arquivos_seguranca():
-    # Bloqueio em caminhos protegidos
     res = execute_skill("gerenciar_arquivos", {"acao": "deletar", "origem": "C:\\Windows"})
     assert "bloqueada por segurança" in res.lower()
 
-    # Listagem de diretório
     res_list = execute_skill("gerenciar_arquivos", {"acao": "listar", "origem": "."})
     assert "conteúdo do diretório" in res_list.lower() or "diretório" in res_list.lower()
 
 
 def test_agendamento_e_listagem():
     res_add = execute_skill("agendar_execucao", {"horario": "10:00", "comando": "Rotina de teste", "tipo": "diario"})
-    # A skill retorna "Rotina agendada: ..." ou "sucesso" dependendo da versão
     assert "agendada" in res_add.lower() or "sucesso" in res_add.lower(), f"Resposta inesperada: {res_add!r}"
 
     res_list = execute_skill("listar_agendamentos", {})

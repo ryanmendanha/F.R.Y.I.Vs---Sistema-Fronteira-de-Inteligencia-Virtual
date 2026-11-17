@@ -14,7 +14,7 @@ import threading
 import time
 from typing import Any, Final
 
-MAX_TURNOS_HISTORICO: Final[int] = 8  # 8 mensagens (4 pares usuário/assistente)
+MAX_TURNOS_HISTORICO: Final[int] = 8
 
 _lock = threading.Lock()
 _historico: list[dict[str, str]] = []

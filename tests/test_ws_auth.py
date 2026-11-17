@@ -82,10 +82,10 @@ class TestWebSocketAuth:
         import server
         original = server._API_TOKEN
         try:
-            server._API_TOKEN = ""  # modo dev
+            server._API_TOKEN = ""
             client = _get_client()
             with client.websocket_connect("/ws") as ws:
-                ws.receive_json()  # welcome
+                ws.receive_json()
                 ws.send_json({"type": "ping"})
                 resp = ws.receive_json()
                 assert resp["type"] == "pong"

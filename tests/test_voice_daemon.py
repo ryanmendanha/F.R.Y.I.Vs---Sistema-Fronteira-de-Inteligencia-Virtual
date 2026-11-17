@@ -35,24 +35,20 @@ class TestVoiceDaemonStateMachine:
 
         assert daemon.estado == "DORMINDO"
 
-        # 1. Envia fala da wake word (4 chunks de fala + 4 chunks de silêncio)
         for _ in range(4):
             daemon.processar_chunk(_bloco_fala())
         for _ in range(4):
             daemon.processar_chunk(_bloco_silencio())
 
-        # Deve ter passado por VERIFICANDO -> SENHOR_Q -> OUVINDO_PEDIDO
         assert len(senhor_tocado) == 1
         assert daemon.estado == "OUVINDO_PEDIDO"
         assert any(e.get("type") == "wake_detected" and e.get("response") == "Senhor?" for e in eventos_ws)
 
-        # 2. Envia fala do comando (6 chunks de fala + 8 chunks de silêncio)
         for _ in range(6):
             daemon.processar_chunk(_bloco_fala())
         for _ in range(8):
             daemon.processar_chunk(_bloco_silencio())
 
-        # Deve ter executado o comando e retornado a DORMINDO (exigindo wake word no próximo turno)
         assert comandos_executados == ["crie uma planilha de vendas"]
         assert daemon.estado == "DORMINDO"
         assert daemon.historico_estados == [
@@ -156,8 +152,6 @@ class TestVoiceDaemonStateMachine:
         )
         daemon._warmup_restante = 10
 
-        # Mesmo com chunks altos durante o warmup de inicialização do microfone,
-        # ela deve permanecer 100% desligada (DORMINDO) sem chamar Whisper ou dizer Senhor?
         for _ in range(10):
             daemon.processar_chunk(_bloco_fala(0.25))
 
@@ -176,7 +170,6 @@ class TestVoiceDaemonStateMachine:
             tocando_fn=lambda: False,
         )
 
-        # Apenas 2 chunks de barulho curto seguidos de silêncio (< min_voz_ativa_chunks)
         daemon.processar_chunk(_bloco_fala(0.15))
         daemon.processar_chunk(_bloco_fala(0.15))
         for _ in range(5):
@@ -206,20 +199,17 @@ class TestVoiceDaemonStateMachine:
             tocando_fn=lambda: False,
         )
 
-        # Acorda com wake word
         for _ in range(4):
             daemon.processar_chunk(_bloco_fala())
         for _ in range(4):
             daemon.processar_chunk(_bloco_silencio())
         assert daemon.estado == "OUVINDO_PEDIDO"
 
-        # Envia ruído que o Whisper alucinaria como 'genios genios genios...'
         for _ in range(6):
             daemon.processar_chunk(_bloco_fala())
         for _ in range(8):
             daemon.processar_chunk(_bloco_silencio())
 
-        # Deve descartar a alucinação e voltar para DORMINDO sem chamar o pipeline
         assert comandos_executados == []
         assert daemon.estado == "DORMINDO"
 
@@ -266,7 +256,6 @@ class TestWebCoPilotNavigation:
             assert resp == RESPOSTA_FUNCAO_EMPRESAS
             assert tools == []
 
-        # Garante que comandos de ação com a palavra "empresa" não são interceptados
         assert _is_asking_about_companies("Crie uma planilha de despesas da empresa") is False
         assert _is_asking_about_companies("Pesquise sobre a empresa Microsoft") is False
 
@@ -278,13 +267,12 @@ class TestWebCoPilotNavigation:
             transcrever_wake_fn=lambda _a: transcricoes.append(1) or "Frives",
             tocar_senhor_fn=lambda: None,
             executar_comando_fn=lambda _cmd: None,
-            tocando_fn=lambda: True,  # simulando IA falando
+            tocando_fn=lambda: True,
         )
 
         assert daemon.esta_falando() is True
         assert daemon.escuta_habilitada() is False
 
-        # Mesmo com fala alta contínua, chunks devem ser totalmente ignorados
         for _ in range(8):
             daemon.processar_chunk(_bloco_fala(0.30))
         for _ in range(6):
@@ -294,13 +282,12 @@ class TestWebCoPilotNavigation:
         assert daemon.estado == "DORMINDO"
         assert daemon.acionar_manual() is False
 
-        # Agora simulando IA processando comando
         daemon_proc = VoiceDaemon(
             transcrever_wake_fn=lambda _a: transcricoes.append(1) or "Frives",
             tocar_senhor_fn=lambda: None,
             executar_comando_fn=lambda _cmd: None,
             tocando_fn=lambda: False,
-            processando_fn=lambda: True,  # simulando IA pensando / inferência
+            processando_fn=lambda: True,
         )
 
         assert daemon_proc.esta_processando() is True
@@ -322,7 +309,6 @@ class TestWebCoPilotNavigation:
         assert mute_state.is_speaking() is False
         assert mute_state.escuta_permitida() is True
 
-        # Processando: escuta deve ser bloqueada
         mute_state.iniciar_processamento()
         assert mute_state.is_processing() is True
         assert mute_state.escuta_permitida() is False
@@ -330,14 +316,11 @@ class TestWebCoPilotNavigation:
         assert mute_state.is_processing() is False
         assert mute_state.escuta_permitida() is True
 
-        # Falando: escuta deve ser bloqueada
         mute_state.definir_falando(True)
         assert mute_state.is_speaking() is True
         assert mute_state.escuta_permitida() is False
         mute_state.definir_falando(False, cooldown=0.0)
         assert mute_state.is_speaking() is False
         assert mute_state.escuta_permitida() is True
-
-
 
 

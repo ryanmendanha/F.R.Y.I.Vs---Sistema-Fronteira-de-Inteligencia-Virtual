@@ -107,7 +107,6 @@ async def processar_comando(
     if origem in ("voz", "daemon"):
         status_overlay(f"Processando: {texto[:42]}", ativo=True, duracao=10.0)
 
-    # 0. Verifica cache de respostas pré-indexadas (respostas instantâneas para identidade e conversa)
     cache_hit = None
     if buscar_resposta_cache_fn:
         try:
@@ -198,8 +197,6 @@ async def processar_comando(
             has_audio = True
             audio_url = f"/api/audio/last?v={uuid.uuid4().hex[:8]}"
             deve_tocar = _deve_tocar_local(origem, tocar_local)
-            # Envia a resposta textual para a UI IMEDIATAMENTE antes de bloquear no áudio local,
-            # eliminando 6 a 8 segundos de atraso visual no balão do chat!
             if broadcast_fn and origem == "daemon":
                 await broadcast_fn({
                     "type": "chat_response",

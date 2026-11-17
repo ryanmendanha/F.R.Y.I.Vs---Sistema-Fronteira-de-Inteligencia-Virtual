@@ -32,13 +32,11 @@ except ImportError:
     _Document = None
     _DOCX_AVAILABLE = False
 
-# Diretórios protegidos contra exclusão acidental
 _PROTECTED_PATHS: Final[set[str]] = {
     "c:\\", "c:\\windows", "c:\\windows\\system32", "c:\\program files",
     "c:\\program files (x86)", os.environ.get("SYSTEMROOT", "c:\\windows").lower()
 }
 
-# Pasta padrão onde TODAS as planilhas criadas pela FRYIVS são salvas
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
 PLANILHAS_DIR: Final[Path] = PROJECT_ROOT / "planilhas-fryivs"
 
@@ -222,8 +220,6 @@ def _aplicar_estilo_executivo(p: Path) -> None:
     wb.save(p)
 
 
-# ── Schemas Pydantic ────────────────────────────────────────────────────────
-
 class GerenciarArquivosParams(BaseModel):
     acao: Literal["copiar", "mover", "deletar", "criar_pasta", "listar"] = Field(
         ...,
@@ -252,8 +248,6 @@ class ConsultarPlanilhaParams(BaseModel):
     )
 
 
-# ── Funções Executáveis ─────────────────────────────────────────────────────
-
 def gerenciar_arquivos(acao: str, origem: str, destino: str | None = None) -> str:
     """
     Executa ações seguras no sistema de arquivos usando pathlib e shutil.
@@ -262,7 +256,6 @@ def gerenciar_arquivos(acao: str, origem: str, destino: str | None = None) -> st
         p_origem = Path(origem).resolve()
         acao_limpa = acao.lower().strip()
 
-        # Proteção contra deleção de diretórios vitais do Windows
         if acao_limpa == "deletar":
             caminho_str = str(p_origem).lower()
             if caminho_str in _PROTECTED_PATHS or len(p_origem.parts) <= 2:
@@ -293,7 +286,6 @@ def gerenciar_arquivos(acao: str, origem: str, destino: str | None = None) -> st
                 txt += f" e mais {resto} itens."
             return f"Conteúdo do diretório ({p_origem.name}): {txt}"
 
-        # Operações que requerem destino
         if not destino:
             return f"A ação '{acao}' requer o parâmetro 'destino'."
 
@@ -337,7 +329,6 @@ def consultar_planilha(
         if caminho is None:
             return f"Arquivo de planilha não encontrado: '{caminho_arquivo}' (procurado também em '{PLANILHAS_DIR.name}')."
 
-        # Carregar arquivo com base na extensão
         ext = caminho.suffix.lower()
         if ext in (".xlsx", ".xlsm", ".xltx", ".xltm"):
             df = pd.read_excel(caminho, engine="openpyxl")
@@ -364,12 +355,10 @@ def consultar_planilha(
             if not filtro_coluna or filtro_valor is None:
                 return "Para filtrar a planilha, informe 'filtro_coluna' e 'filtro_valor'."
 
-            # Busca case-insensitive no nome da coluna
             col_match = next((c for c in col_nomes if str(c).lower() == filtro_coluna.lower()), None)
             if not col_match:
                 return f"Coluna '{filtro_coluna}' não encontrada. Colunas disponíveis: {col_nomes}"
 
-            # Filtrar
             filtrado = df[df[col_match].astype(str).str.contains(str(filtro_valor), case=False, na=False)]
             total_matches = len(filtrado)
             amostra = filtrado.head(3).to_dict(orient="records")
@@ -390,7 +379,6 @@ def _find_excel_exe() -> str | None:
     e em caminhos conhecidos das versões Office 2016, 2019, 2021 e 365.
     """
     import subprocess
-    # 1. Busca pelo Registro do Windows (método mais confiável)
     try:
         import winreg
         key_paths = [
@@ -409,7 +397,6 @@ def _find_excel_exe() -> str | None:
     except Exception:
         pass
 
-    # 2. Caminhos absolutos para todas as versões do Office
     excel_candidates = [
         r"C:\Program Files\Microsoft Office\Office16\EXCEL.EXE",
         r"C:\Program Files\Microsoft Office\root\Office16\EXCEL.EXE",
@@ -418,7 +405,6 @@ def _find_excel_exe() -> str | None:
         r"C:\Program Files (x86)\Microsoft Office\Office16\EXCEL.EXE",
         r"C:\Program Files (x86)\Microsoft Office\root\Office16\EXCEL.EXE",
         r"C:\Program Files (x86)\Microsoft Office\Office15\EXCEL.EXE",
-        # Office 365 / 2021 Click-to-Run
         os.path.expandvars(r"%ProgramFiles%\Microsoft Office\root\Office16\EXCEL.EXE"),
         os.path.expandvars(r"%ProgramFiles(x86)%\Microsoft Office\root\Office16\EXCEL.EXE"),
     ]
@@ -426,7 +412,6 @@ def _find_excel_exe() -> str | None:
         if c and os.path.exists(c):
             return c
 
-    # 3. Fallback via shutil.which
     import shutil
     return shutil.which("EXCEL.EXE") or shutil.which("excel")
 
@@ -449,7 +434,6 @@ def abrir_planilha(caminho_arquivo: str | None = None) -> str:
         except Exception:
             pass
 
-    # 1. Método Primário: Office Live STA COM (sem roubar foco + barra FRY.png)
     try:
         from skills.office_live import abrir_planilha_live
         ok, msg_live = abrir_planilha_live(Path(caminho_abs) if caminho_abs else None, sem_foco=True)
@@ -458,7 +442,6 @@ def abrir_planilha(caminho_arquivo: str | None = None) -> str:
     except Exception as e_com:
         print(f"[abrir_planilha] Aviso no OfficeLive COM: {e_com}. Tentando método nativo...")
 
-    # 2. Método Secundário: os.startfile nativo do Windows
     if caminho_abs and os.path.exists(caminho_abs):
         try:
             os.startfile(caminho_abs)
@@ -467,7 +450,6 @@ def abrir_planilha(caminho_arquivo: str | None = None) -> str:
         except Exception:
             pass
 
-    # 3. Método Terciário: subprocess com SW_SHOWNOACTIVATE (4)
     import subprocess
     excel_exe = _find_excel_exe()
     if excel_exe and os.path.exists(excel_exe):
@@ -513,7 +495,6 @@ def criar_planilha(
     try:
         p = _caminho_nova_planilha(str(caminho_arquivo))
 
-        # Normaliza booleanos e argumentos passados como string pela LLM
         if isinstance(abrir_no_excel, str):
             abrir_no_excel = abrir_no_excel.strip().lower() in ("true", "1", "yes", "sim")
 
@@ -523,7 +504,6 @@ def criar_planilha(
         if not isinstance(colunas, list):
             colunas = None
 
-        # Listas enviadas como texto (JSON ou literal Python) são convertidas
         dados_raw = _parse_estrutura(dados)
         dados_norm: list[dict[str, Any]] | None = None
         if isinstance(dados_raw, list) and dados_raw:
@@ -552,7 +532,6 @@ def criar_planilha(
                 "Status": ["Concluído", "Pendente", "Em Andamento"]
             })
 
-        # Salva base com Pandas (só fecha no Excel via COM se o arquivo estiver travado)
         try:
             df.to_excel(p, index=False, engine="openpyxl")
         except PermissionError:
@@ -619,7 +598,6 @@ def editar_planilha(
                 return None, f"Coluna de filtro '{filtro_coluna}' não encontrada. Colunas: {cols}"
             alvo = str(filtro_valor).strip().lower()
             serie = df[col_f].astype(str).str.strip().str.lower()
-            # Normaliza números lidos como float (ex.: '10.0' vs '10')
             serie = serie.str.replace(r"\.0$", "", regex=True)
             alvo = alvo[:-2] if alvo.endswith(".0") else alvo
             return serie == alvo, None
@@ -695,7 +673,6 @@ def editar_planilha(
         )
         garantizar_backup_sessao(p)
 
-        # Se já estiver aberta no Excel (ou em execução interativa com abrir_no_excel), edita AO VIVO via COM sem fechar
         aberta_agora = False if _em_teste() else esta_aberta_no_excel(p)
         if aberta_agora or (abrir_no_excel and not _em_teste()):
             ok_live, msg_live = editar_planilha_live(p, df, resumo, sem_foco=True)
@@ -707,7 +684,6 @@ def editar_planilha(
                     pass
                 return msg_live
 
-        # Fallback: grava com openpyxl (fecha se necessário e reabre em 2º plano)
         fechado = _fechar_no_excel_se_aberto(p)
         try:
             df.to_excel(p, index=False, engine="openpyxl")
@@ -732,8 +708,6 @@ def editar_planilha(
     except Exception as e:
         return f"Falha ao editar planilha: {e}"
 
-
-# ── Schemas OpenAPI ─────────────────────────────────────────────────────────
 
 FILE_DATA_SCHEMAS: Final[list[dict[str, Any]]] = [
     {
@@ -888,8 +862,6 @@ FILE_DATA_SCHEMAS: Final[list[dict[str, Any]]] = [
 ]
 
 
-# ── Funções de Manipulação de Documentos Word (.docx) ──────────────────────
-
 def _find_word_exe() -> str | None:
     """
     Localiza o executável do Microsoft Word procurando no Registro do Windows
@@ -957,30 +929,24 @@ def criar_documento_word(
 
         doc = _Document()
 
-        # Título principal (Heading 1)
         if titulo:
             doc.add_heading(titulo, level=1)
 
-        # Subtítulo (Heading 2)
         if subtitulo:
             doc.add_heading(subtitulo, level=2)
 
-        # Parágrafos de texto
         if paragrafos:
             for paragrafo in paragrafos:
                 doc.add_paragraph(str(paragrafo))
 
-        # Lista com marcadores (bullet points)
         if lista_itens:
             for item in lista_itens:
                 doc.add_paragraph(str(item), style="List Bullet")
 
-        # Lista numerada
         if lista_numerada:
             for item in lista_numerada:
                 doc.add_paragraph(str(item), style="List Number")
 
-        # Tabela estruturada
         if tabela_dados and len(tabela_dados) > 0:
             num_colunas = len(tabela_dados[0])
             tabela = doc.add_table(rows=len(tabela_dados), cols=num_colunas)
@@ -989,7 +955,6 @@ def criar_documento_word(
                 for j, celula in enumerate(linha):
                     cell = tabela.cell(i, j)
                     cell.text = str(celula)
-                    # Formatar cabeçalho (primeira linha) com negrito
                     if i == 0:
                         for run in cell.paragraphs[0].runs:
                             run.bold = True
@@ -1064,7 +1029,6 @@ def editar_documento_word(
         )
         garantizar_backup_sessao(caminho)
 
-        # Se já estiver aberto no Microsoft Word, edita AO VIVO via COM sem conflito de lock
         if not _em_teste() and esta_aberto_no_word(caminho):
             ok_live, msg_live = editar_documento_word_live(
                 caminho,
@@ -1084,7 +1048,6 @@ def editar_documento_word(
 
         import io
 
-        # Lê o documento em memória com retries para evitar falhas por lock de leitura
         doc_stream = None
         for tentativa in range(15):
             try:
@@ -1099,7 +1062,6 @@ def editar_documento_word(
         doc = _Document(doc_stream)
         substituicoes = 0
 
-        # Substituição de texto nos parágrafos
         if substituir_de and substituir_para is not None:
             for paragrafo in doc.paragraphs:
                 if substituir_de in paragrafo.text:
@@ -1107,7 +1069,6 @@ def editar_documento_word(
                         if substituir_de in run.text:
                             run.text = run.text.replace(substituir_de, substituir_para)
                             substituicoes += 1
-            # Substituição em células de tabelas
             for tabela in doc.tables:
                 for linha in tabela.rows:
                     for celula in linha.cells:
@@ -1118,16 +1079,13 @@ def editar_documento_word(
                                         run.text = run.text.replace(substituir_de, substituir_para)
                                         substituicoes += 1
 
-        # Adicionar título ao final
         if adicionar_titulo:
             doc.add_heading(adicionar_titulo, level=2)
 
-        # Adicionar parágrafos ao final
         if adicionar_paragrafos:
             for p in adicionar_paragrafos:
                 doc.add_paragraph(str(p))
 
-        # Serializa para buffer e grava de forma atômica via os.replace para evitar locks transitórios
         out_stream = io.BytesIO()
         doc.save(out_stream)
         data_bytes = out_stream.getvalue()
@@ -1212,7 +1170,6 @@ def ler_documento_word(caminho_arquivo: str) -> str:
             else:
                 linhas.append(texto)
 
-        # Extrair texto de tabelas
         for idx_tab, tabela in enumerate(doc.tables):
             linhas.append(f"\n[Tabela {idx_tab + 1}]")
             for linha in tabela.rows:
@@ -1286,8 +1243,6 @@ def abrir_documento_word(caminho_arquivo: str | None = None) -> str:
         except Exception as e2:
             return f"Erro ao abrir documento Word: {e} / {e2}"
 
-
-# ── Schemas OpenAPI para as funções Word ─────────────────────────────────────
 
 WORD_DOC_SCHEMAS: Final[list[dict[str, Any]]] = [
     {

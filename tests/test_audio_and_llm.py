@@ -11,7 +11,6 @@ import unittest
 from unittest.mock import MagicMock, patch
 import numpy as np
 
-# Garante que o diretório raiz esteja no path
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
@@ -165,7 +164,6 @@ class TestAudioTTS(unittest.TestCase):
         mock_response.iter_content.return_value = [b"unique-audio-stream"]
         mock_post.return_value = mock_response
 
-        # Modo multi-usuário: gera arquivos separados para usuários simultâneos
         path1 = falar("Resposta usuário 1", unique_file=True)
         path2 = falar("Resposta usuário 2", unique_file=True)
         try:
@@ -194,7 +192,6 @@ class TestAudioTTS(unittest.TestCase):
         mock_response.iter_content.return_value = [b"concurrent-bytes"]
         mock_post.return_value = mock_response
 
-        # Dispara 10 requisições simultâneas
         def _task(i):
             return falar(f"Mensagem simultanea {i}", unique_file=True)
 
@@ -202,7 +199,6 @@ class TestAudioTTS(unittest.TestCase):
             futures = [executor.submit(_task, i) for i in range(10)]
             paths = [f.result(timeout=10) for f in futures]
 
-        # Todos devem ter gerado arquivos válidos e distintos sem conflito
         self.assertEqual(len(paths), 10)
         self.assertEqual(len(set(paths)), 10)
         for p in paths:
@@ -233,17 +229,14 @@ class TestLLMProfiles(unittest.TestCase):
         mock_response.message.tool_calls = None
         mock_chat.return_value = mock_response
 
-        # Testa Fryivs Beta (40 tokens)
         ask_fryvis("Olá", profile="fryvis_beta", provider="ollama")
         _, kwargs = mock_chat.call_args
         self.assertEqual(kwargs["options"]["num_predict"], 40)
 
-        # Testa Fryivs 1.0 (50 tokens)
         ask_fryvis("Olá", profile="fryvis_1.0", provider="ollama")
         _, kwargs = mock_chat.call_args
         self.assertEqual(kwargs["options"]["num_predict"], 50)
 
-        # Testa Fryivs Recursive 1.1 (80 tokens)
         ask_fryvis("Olá", profile="fryvis_recursive", provider="ollama")
         _, kwargs = mock_chat.call_args
         self.assertEqual(kwargs["options"]["num_predict"], 80)

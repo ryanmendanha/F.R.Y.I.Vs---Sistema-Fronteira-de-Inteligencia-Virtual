@@ -14,18 +14,16 @@ import threading
 import warnings
 from typing import TYPE_CHECKING, Any
 
-# Suprime de forma limpa avisos upstream de telemetria e deprecations enquanto aguarda update do ChromaDB
 warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"chromadb.*")
 warnings.filterwarnings("ignore", message=r".*asyncio\.iscoroutinefunction.*", category=DeprecationWarning)
 
-# Desativa telemetrias antes de qualquer importação
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
 os.environ["CHROMA_TELEMETRY"] = "False"
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 try:
     import chromadb.telemetry.product.posthog
-    chromadb.telemetry.product.posthog.Posthog.capture = lambda *args, **kwargs: None  # type: ignore
+    chromadb.telemetry.product.posthog.Posthog.capture = lambda *args, **kwargs: None
 except Exception:
     pass
 
@@ -36,19 +34,17 @@ if TYPE_CHECKING:
     from chromadb.api import ClientAPI
     from chromadb.api.models.Collection import Collection
 
-# Registry multiton thread-safe: mapeia db_path normalizado -> ClientAPI
 _CHROMA_CLIENTS: dict[str, ClientAPI] = {}
-_CHROMA_CLIENT: ClientAPI | None = None  # Retrocompatibilidade com instâncias default
+_CHROMA_CLIENT: ClientAPI | None = None
 _COLLECTIONS_CACHE: dict[str, Any] = {}
 _CLIENT_LOCK = threading.Lock()
 DEFAULT_DB_PATH: str = os.path.abspath("fryvis_memory")
 
-# Configurações de sintonia de índice vetorial HNSW (vector-index-tuning playbook)
 HNSW_DEFAULT_METADATA: dict[str, Any] = {
-    "hnsw:space": "cosine",            # Distância cosseno para embeddings semânticos
-    "hnsw:construction_ef": 128,       # Maior precisão durante a construção do grafo HNSW
-    "hnsw:search_ef": 64,              # Equilíbrio ideal entre recall (>98%) e latência (<2ms)
-    "hnsw:M": 16,                      # Número de conexões bidirecionais por nó
+    "hnsw:space": "cosine",
+    "hnsw:construction_ef": 128,
+    "hnsw:search_ef": 64,
+    "hnsw:M": 16,
 }
 
 
@@ -81,7 +77,6 @@ def get_chroma_client(
         )
         _CHROMA_CLIENTS[norm_path] = client
 
-        # Mantém _CHROMA_CLIENT alinhado para compatibilidade
         if norm_path == os.path.abspath(DEFAULT_DB_PATH) or _CHROMA_CLIENT is None:
             _CHROMA_CLIENT = client
 
@@ -102,7 +97,6 @@ def get_or_create_collection(
     if cache_key in _COLLECTIONS_CACHE:
         return _COLLECTIONS_CACHE[cache_key]
 
-    # Compatibilidade com testes que injetam coleções diretamente em _COLLECTIONS_CACHE[name]
     if name in _COLLECTIONS_CACHE and not isinstance(_COLLECTIONS_CACHE[name], dict):
         return _COLLECTIONS_CACHE[name]
 
@@ -117,7 +111,7 @@ def get_or_create_collection(
         metadata=collection_metadata
     )
     _COLLECTIONS_CACHE[cache_key] = collection
-    _COLLECTIONS_CACHE[name] = collection  # Atalho para backward compatibility
+    _COLLECTIONS_CACHE[name] = collection
     return collection
 
 

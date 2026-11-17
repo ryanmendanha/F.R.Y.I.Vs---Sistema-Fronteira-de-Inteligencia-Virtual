@@ -17,13 +17,11 @@ import unicodedata
 from difflib import SequenceMatcher
 from typing import Final
 
-# Grafias que o Whisper produz para o nome da assistente
 VARIANTES: Final[frozenset[str]] = frozenset({
     "fryivs", "fryvis", "frives", "fraives", "fraivis", "frayvis", "fraivs",
     "fraivz", "frivis", "friives", "fraive", "fraivis", "frayves", "fryves",
 })
 
-# Palavras parecidas que NUNCA podem acordar a assistente
 NEGATIVOS: Final[frozenset[str]] = frozenset({
     "drive", "drives", "frio", "frios", "fria", "frias", "five", "fries", "frevo",
     "frete", "fretes", "frevos", "privê", "prive", "livros", "frisa", "frita",
@@ -73,7 +71,6 @@ def contem_nome(texto: str, limiar: float | None = None) -> tuple[bool, str]:
     if not toks:
         return False, ""
 
-    # Bloqueia alucinação do WAKE_PROMPT do Whisper (ex: "Frives, Frives, Fraives." ou "Frives, Frives.")
     qtd_nomes = sum(1 for t in toks if _eh_nome(t, lim))
     if qtd_nomes >= 2:
         nao_nomes = [t for t in toks if not _eh_nome(t, lim)]
@@ -81,7 +78,6 @@ def contem_nome(texto: str, limiar: float | None = None) -> tuple[bool, str]:
             return False, ""
 
     for i, tok in enumerate(toks):
-        # Token único ("frives") ou dividido pelo Whisper em dois ("fra ives")
         candidatos = [(tok, 1)]
         if i + 1 < len(toks):
             candidatos.append((tok + toks[i + 1], 2))
@@ -97,6 +93,5 @@ def comando_util(resto: str) -> bool:
     letras = re.sub(r"[^a-z]", "", normalizar(resto))
     if len(letras) < 4:
         return False
-    # Repetições do próprio nome ("frives frives") não são pedido
     return not all(_eh_nome(t, _limiar()) for t in normalizar(resto).split())
 

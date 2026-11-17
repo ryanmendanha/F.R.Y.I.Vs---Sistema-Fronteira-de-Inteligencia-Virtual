@@ -1,6 +1,5 @@
 export type AIOrbState = "idle" | "listening" | "thinking" | "speaking";
 
-/** Modelo visual do orbe — selecionável pelo usuário */
 export type AIOrbModel = "orbital-hud" | "neural-fibonacci";
 
 export interface AIOrbColors {
@@ -50,13 +49,11 @@ export interface AIOrbConfig {
 }
 
 export interface AIOrbProps {
-  /** Modelo visual selecionado (padrão: "orbital-hud") */
   model?: AIOrbModel;
   state?: AIOrbState;
   audioLevel?: number; // 0.0 to 1.0
   className?: string;
   style?: React.CSSProperties;
   enableAudioReaction?: boolean;
-  /** Override parcial da configuração visual do orbe (aplicado sobre DEFAULT_ORB_CONFIG) */
   orbConfig?: Partial<AIOrbConfig>;
 }

@@ -30,13 +30,11 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-# ── DOC-001 ──────────────────────────────────────────────────────────────────
 def test_DOC_001_modulo_disponivel():
     """DOC-001: python-docx está instalado e disponível."""
     assert _DOCX_AVAILABLE, "python-docx não está instalado — instale com: pip install python-docx"
 
 
-# ── DOC-002 ──────────────────────────────────────────────────────────────────
 def test_DOC_002_criar_com_titulo():
     """DOC-002: Criar documento Word com título principal (Heading 1)."""
     resultado = criar_documento_word(
@@ -47,7 +45,6 @@ def test_DOC_002_criar_com_titulo():
     assert "criado" in resultado.lower() or "sucesso" in resultado.lower(), resultado
 
 
-# ── DOC-003 ──────────────────────────────────────────────────────────────────
 def test_DOC_003_criar_com_subtitulo():
     """DOC-003: Criar documento com subtítulo (Heading 2)."""
     resultado = criar_documento_word(
@@ -56,12 +53,10 @@ def test_DOC_003_criar_com_subtitulo():
         subtitulo="Seção de Análise de Dados"
     )
     assert Path(sb("doc_subtitulo.docx")).exists(), f"Documento não criado: {resultado}"
-    # Verificar conteúdo
     leitura = ler_documento_word(sb("doc_subtitulo.docx"))
     assert "Análise" in leitura or "Relatório" in leitura, leitura
 
 
-# ── DOC-004 ──────────────────────────────────────────────────────────────────
 def test_DOC_004_criar_com_paragrafos():
     """DOC-004: Criar documento com parágrafos de texto."""
     paragrafos = [
@@ -75,7 +70,6 @@ def test_DOC_004_criar_com_paragrafos():
     assert "primeiro parágrafo" in leitura, leitura
 
 
-# ── DOC-005 ──────────────────────────────────────────────────────────────────
 def test_DOC_005_criar_lista_bullets():
     """DOC-005: Criar documento com lista de marcadores (bullet points)."""
     itens = ["Item Alpha", "Item Beta", "Item Gamma", "Item Delta"]
@@ -85,7 +79,6 @@ def test_DOC_005_criar_lista_bullets():
     assert "Alpha" in leitura, leitura
 
 
-# ── DOC-006 ──────────────────────────────────────────────────────────────────
 def test_DOC_006_criar_lista_numerada():
     """DOC-006: Criar documento com lista numerada."""
     itens = ["Primeiro passo", "Segundo passo", "Terceiro passo", "Quarto passo"]
@@ -95,7 +88,6 @@ def test_DOC_006_criar_lista_numerada():
     assert "passo" in leitura.lower(), leitura
 
 
-# ── DOC-007 ──────────────────────────────────────────────────────────────────
 def test_DOC_007_criar_tabela_4x3():
     """DOC-007: Criar documento com tabela estruturada 4x3."""
     tabela = [
@@ -110,7 +102,6 @@ def test_DOC_007_criar_tabela_4x3():
     assert "Notebook" in leitura or "Tabela" in leitura, leitura
 
 
-# ── DOC-008 ──────────────────────────────────────────────────────────────────
 def test_DOC_008_tabela_com_dados_inventario():
     """DOC-008: Criar tabela de inventário com dados reais."""
     inventario = [
@@ -130,10 +121,8 @@ def test_DOC_008_tabela_com_dados_inventario():
     assert "Inventário" in leitura or "Estoque" in leitura, leitura
 
 
-# ── DOC-009 ──────────────────────────────────────────────────────────────────
 def test_DOC_009_ler_documento_existente():
     """DOC-009: Extrair texto completo de documento existente."""
-    # Cria um documento de referência
     criar_documento_word(
         sb("doc_leitura.docx"),
         titulo="Documento de Leitura",
@@ -145,7 +134,6 @@ def test_DOC_009_ler_documento_existente():
     assert "palavras" in resultado.lower(), resultado
 
 
-# ── DOC-010 ──────────────────────────────────────────────────────────────────
 def test_DOC_010_substituir_texto():
     """DOC-010: Localizar e substituir palavra-chave no documento."""
     criar_documento_word(
@@ -164,7 +152,6 @@ def test_DOC_010_substituir_texto():
     assert "PLACEHOLDER" not in leitura, "PLACEHOLDER ainda presente"
 
 
-# ── DOC-011 ──────────────────────────────────────────────────────────────────
 def test_DOC_011_adicionar_paragrafos_ao_existente():
     """DOC-011: Adicionar parágrafos ao final de documento existente."""
     criar_documento_word(
@@ -183,7 +170,6 @@ def test_DOC_011_adicionar_paragrafos_ao_existente():
     assert "Primeiro parágrafo adicionado" in leitura, leitura
 
 
-# ── DOC-012 ──────────────────────────────────────────────────────────────────
 def test_DOC_012_salvar_com_acento_no_caminho():
     """DOC-012: Salvar documento em subpasta com caracteres acentuados."""
     caminho_acento = str(SANDBOX / "relatórios" / "ata_reunião_2026.docx")
@@ -195,7 +181,6 @@ def test_DOC_012_salvar_com_acento_no_caminho():
     assert Path(caminho_acento).exists(), f"Falhou com caminho acentuado: {resultado}"
 
 
-# ── DOC-013 ──────────────────────────────────────────────────────────────────
 def test_DOC_013_ler_documento_inexistente():
     """DOC-013: Ler documento inexistente — mensagem de erro amigável."""
     resultado = ler_documento_word(sb("nao_existe.docx"))
@@ -203,7 +188,6 @@ def test_DOC_013_ler_documento_inexistente():
         f"Erro não amigável: {resultado}"
 
 
-# ── DOC-014 ──────────────────────────────────────────────────────────────────
 def test_DOC_014_editar_preserva_conteudo_anterior():
     """DOC-014: Edição incremental preserva o conteúdo original."""
     criar_documento_word(
@@ -220,7 +204,6 @@ def test_DOC_014_editar_preserva_conteudo_anterior():
     assert "Conteúdo novo" in leitura, f"Conteúdo novo ausente: {leitura}"
 
 
-# ── DOC-015 ──────────────────────────────────────────────────────────────────
 def test_DOC_015_abrir_documento_sem_crash():
     """DOC-015: Chamar abrir_documento_word não lança exceção (Word pode não estar instalado)."""
     criar_documento_word(
