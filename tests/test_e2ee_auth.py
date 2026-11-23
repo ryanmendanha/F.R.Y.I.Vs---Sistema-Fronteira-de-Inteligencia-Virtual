@@ -379,6 +379,8 @@ class TestHardSpeechAndInteractionLock:
         assert client.get("/api/memory").status_code == 423
         assert client.delete("/api/memory/mem-1").status_code == 423
         assert client.post("/api/skills/execute", json={"skill": "listar_janelas", "arguments": {}}).status_code == 423
+        assert client.get("/api/knowledge/search?q=teste").status_code == 423
+        assert client.post("/api/auth/e2ee/lock").status_code == 423
 
         # WebSocket deve ser fechado com código 4423
         with pytest.raises(WebSocketDisconnect) as exc_info:
@@ -487,7 +489,11 @@ class TestFullE2EELifecycleAndEncryptedChat:
         )
         assert daemon.escuta_habilitada() is True
 
-        # 8. Bloqueia imediatamente via POST /api/auth/e2ee/lock
+        # 8. POST /api/auth/e2ee/lock SEM token deve falhar com 423 (proteção anti-CSRF/DoS)
+        assert client.post("/api/auth/e2ee/lock").status_code == 423
+        assert e2ee_auth.is_session_unlocked() is True
+
+        # 8b. Bloqueia imediatamente via POST /api/auth/e2ee/lock COM token válido
         lock_res = client.post("/api/auth/e2ee/lock", headers={"X-E2EE-Session": session_token})
         assert lock_res.status_code == 200
         assert lock_res.json()["unlocked"] is False

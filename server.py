@@ -821,7 +821,8 @@ async def knowledge_reindex(
 async def knowledge_search(
     q: str = Query(..., min_length=1, description="Texto para buscar na base de conhecimento"),
     habilidade: str | None = Query(None, description="Filtrar por habilidade (ex: excel_avancado)"),
-    k: int = Query(3, ge=1, le=10)
+    k: int = Query(3, ge=1, le=10),
+    _e2ee: E2EESessionRecord | None = Depends(require_e2ee_session),
 ) -> dict[str, Any]:
     """Busca trechos relevantes na base de conhecimento."""
     loop = asyncio.get_event_loop()

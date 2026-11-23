@@ -35,7 +35,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from dotenv import dotenv_values, load_dotenv
-from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 # Carrega .env apenas fora de pytest para não poluir suítes legadas
@@ -845,8 +845,10 @@ def post_e2ee_unlock(req: E2EEUnlockRequest, request: Request) -> dict[str, Any]
 
 
 @e2ee_router.post("/lock")
-def post_e2ee_lock() -> dict[str, Any]:
-    """Bloqueia imediatamente a F.R.Y.I.Vs (corta voz, microfone, chat e WebSockets)."""
+def post_e2ee_lock(
+    _e2ee: E2EESessionRecord | None = Depends(require_e2ee_session),
+) -> dict[str, Any]:
+    """Bloqueia imediatamente a F.R.Y.I.Vs (exige sessão E2EE válida para evitar CSRF/DoS)."""
     lock_all_sessions()
     return {
         "unlocked": False,
