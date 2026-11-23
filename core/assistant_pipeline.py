@@ -46,6 +46,20 @@ def _deve_tocar_local(origem: str, explicito: bool | None) -> bool:
 def _serialized(function):
     @functools.wraps(function)
     async def wrapped(*args, **kwargs):
+        from core.e2ee_auth import is_session_unlocked
+        if not is_session_unlocked():
+            return {
+                "locked": True,
+                "user_message": kwargs.get("texto", args[0] if args else ""),
+                "transcription": "",
+                "response": "F.R.Y.I.Vs bloqueada (E2EE). Desbloqueie com senha antes de interagir.",
+                "context_used": "",
+                "tools_executed": [],
+                "has_audio": False,
+                "audio_url": "",
+                "played_locally": False,
+                "from_cache": False,
+            }
         command = Command()
         broadcast = kwargs.get("broadcast_fn")
         from core.mute_state import iniciar_processamento, finalizar_processamento, definir_falando
@@ -98,6 +112,21 @@ async def processar_comando(
     """
     Executa todo o ciclo de inteligência para um comando de texto ou voz.
     """
+    from core.e2ee_auth import is_session_unlocked
+    if not is_session_unlocked():
+        return {
+            "locked": True,
+            "user_message": texto,
+            "transcription": "",
+            "response": "F.R.Y.I.Vs bloqueada (E2EE). Desbloqueie com senha antes de interagir.",
+            "context_used": "",
+            "tools_executed": [],
+            "has_audio": False,
+            "audio_url": "",
+            "played_locally": False,
+            "from_cache": False,
+        }
+
     if broadcast_fn:
         await broadcast_fn({
             "type": "state_change",
@@ -182,7 +211,7 @@ async def processar_comando(
     played_locally = False
     chat_response_enviado = False
 
-    if generate_speech and resposta:
+    if generate_speech and resposta and is_session_unlocked():
         from core.mute_state import definir_falando
         definir_falando(True)
         if broadcast_fn:

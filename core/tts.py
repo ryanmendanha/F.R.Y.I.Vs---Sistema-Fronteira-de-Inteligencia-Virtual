@@ -323,6 +323,11 @@ def falar(
     
     Retorna o caminho do arquivo gerado ou string vazia se indisponível.
     """
+    from core.e2ee_auth import is_session_unlocked
+    if not is_session_unlocked():
+        print("[TTS] Saída de voz bloqueada (F.R.Y.I.Vs travada via E2EE).")
+        return ""
+
     try:
         from core.mute_state import is_muted
         if is_muted():

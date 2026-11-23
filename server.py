@@ -53,7 +53,20 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, W
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from core.e2ee_auth import (
+    E2EESessionRecord,
+    decrypt_chat_envelope,
+    e2ee_router,
+    encrypt_chat_envelope,
+    extract_e2ee_token,
+    is_e2ee_required,
+    is_session_unlocked,
+    register_on_lock_callback,
+    require_e2ee_session,
+    validate_session_token,
+)
 
 _API_TOKEN: str = os.getenv("FRYIVS_API_TOKEN", "")
 
@@ -83,9 +96,14 @@ from core.vector_db import get_or_create_collection
 from core.knowledge_base import indexar as kb_indexar, buscar_conhecimento, status as kb_status
 from skills import ALL_SKILL_SCHEMAS, SKILLS_REGISTRY, execute_skill
 
+_server_loop: asyncio.AbstractEventLoop | None = None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Aquece o roteador de skills, memória, base de conhecimento e o modelo Ollama no startup."""
+    global _server_loop
+    _server_loop = asyncio.get_running_loop()
     try:
         router = get_skill_router()
         router.ensure_skills_indexed()
@@ -150,13 +168,36 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+_DEFAULT_CORS_ORIGINS = [
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+_extra_cors = [
+    origin.strip()
+    for origin in os.getenv("FRYIVS_CORS_ORIGINS", "").split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_DEFAULT_CORS_ORIGINS + _extra_cors,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-E2EE-Session"],
 )
+
+app.include_router(e2ee_router)
+
+try:
+    from core.opencode_brain import brain_router
+    app.include_router(brain_router)
+except ImportError:
+    pass
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "ui", "static")
 if os.path.exists(STATIC_DIR):
@@ -184,17 +225,62 @@ class ConnectionManager:
                 if connection in self.active_connections:
                     self.active_connections.remove(connection)
 
+    async def close_all_locked(self) -> None:
+        for connection in list(self.active_connections):
+            try:
+                await connection.send_json({"type": "e2ee_locked", "unlocked": False})
+            except Exception:
+                pass
+            try:
+                await connection.close(code=4423, reason="F.R.Y.I.Vs bloqueada (E2EE)")
+            except Exception:
+                pass
+            if connection in self.active_connections:
+                self.active_connections.remove(connection)
+
 
 manager = ConnectionManager()
 
 
+def _on_e2ee_lock() -> None:
+    try:
+        from core import voice_daemon
+        if voice_daemon._daemon_instance is not None:
+            voice_daemon._daemon_instance._resetar_captura()
+            voice_daemon._daemon_instance._mudar_estado("DORMINDO")
+    except Exception:
+        pass
+    try:
+        loop = _server_loop
+        if loop is not None and loop.is_running():
+            asyncio.run_coroutine_threadsafe(manager.close_all_locked(), loop)
+    except Exception:
+        pass
+
+
+register_on_lock_callback(_on_e2ee_lock)
+
+
+class E2EEEnvelope(BaseModel):
+    iv_b64: str = Field(..., min_length=12, description="IV AES-256-GCM (96 bits) em base64")
+    ciphertext_b64: str = Field(..., min_length=16, description="Ciphertext + tag GCM em base64")
+
+
 class ChatRequest(BaseModel):
-    message: str = Field(..., min_length=1, description="Mensagem de texto do usuário")
+    message: str | None = Field(default=None, description="Mensagem de texto do usuário")
+    e2ee: E2EEEnvelope | None = Field(default=None, description="Envelope AES-256-GCM opcional cifrado com a chave de sessão")
     use_memory: bool = Field(default=True, description="Se deve consultar e persistir memória semântica")
     generate_speech: bool = Field(default=True, description="Se deve gerar áudio com voz (TTS)")
     history: list[dict[str, str]] = Field(default_factory=list, description="Histórico prévio de mensagens")
     model_profile: str = Field(default=DEFAULT_PROFILE, description="Perfil de tokens: fryvis_beta (40), fryvis_1.0 (50), fryvis_recursive (80)")
     provider: str | None = Field(default=None, description="Provedor LLM: hybrid, ollama, gemini")
+
+    @model_validator(mode="after")
+    def _validate_message_or_e2ee(self) -> "ChatRequest":
+        if self.e2ee is None:
+            if self.message is None or len(self.message) < 1:
+                raise ValueError("Campo 'message' deve ter pelo menos 1 caractere ou enviar envelope 'e2ee'.")
+        return self
 
 
 class SkillExecuteRequest(BaseModel):
@@ -281,6 +367,8 @@ def get_system_status() -> dict[str, Any]:
         "voice_daemon_active": daemon_info.get("active", False),
         "mic_muted": daemon_info.get("muted", False),
         "active_artifact": artefato,
+        "e2ee_required": is_e2ee_required(),
+        "e2ee_unlocked": is_session_unlocked(),
     }
 
 
@@ -304,19 +392,55 @@ _FRASES_ERRO = [
 
 
 @app.post("/api/chat")
-async def process_chat(req: ChatRequest, _auth: None = Depends(_verificar_token)) -> dict[str, Any]:
-    """Processa uma mensagem de texto com IA, busca semântica vetorial, histórico da sessão e skills."""
+async def process_chat(
+    req: ChatRequest,
+    _auth: None = Depends(_verificar_token),
+    e2ee_session: E2EESessionRecord | None = Depends(require_e2ee_session),
+) -> dict[str, Any]:
+    """Processa uma mensagem de texto com IA (suporta transporte opcional E2EE AES-256-GCM)."""
     loop = asyncio.get_event_loop()
+    use_encrypted_transport = req.e2ee is not None
+
+    message_text = req.message or ""
+    use_memory = req.use_memory
+    generate_speech = req.generate_speech
+    history = req.history
+    model_profile = req.model_profile
+    provider = req.provider
+
+    if use_encrypted_transport:
+        if e2ee_session is None:
+            raise HTTPException(
+                status_code=423,
+                detail="Sessão E2EE válida obrigatória para transporte criptografado.",
+            )
+        decrypted = decrypt_chat_envelope(
+            e2ee_session,
+            req.e2ee.iv_b64,
+            req.e2ee.ciphertext_b64,
+        )
+        message_text = str(decrypted.get("message", ""))
+        if len(message_text) < 1:
+            raise HTTPException(status_code=422, detail="Mensagem descriptografada não pode ser vazia.")
+        use_memory = bool(decrypted.get("use_memory", use_memory))
+        generate_speech = bool(decrypted.get("generate_speech", generate_speech))
+        if isinstance(decrypted.get("history"), list):
+            history = decrypted["history"]
+        if isinstance(decrypted.get("model_profile"), str) and decrypted["model_profile"]:
+            model_profile = decrypted["model_profile"]
+        if "provider" in decrypted:
+            provider = decrypted["provider"]
+
     try:
         from core.assistant_pipeline import processar_comando
         res = await processar_comando(
-            texto=req.message,
+            texto=message_text,
             origem="chat",
-            profile=req.model_profile,
-            provider=req.provider,
-            use_memory=req.use_memory,
-            generate_speech=req.generate_speech,
-            history=req.history,
+            profile=model_profile,
+            provider=provider,
+            use_memory=use_memory,
+            generate_speech=generate_speech,
+            history=history,
             tocar_local=False,
             broadcast_fn=manager.broadcast,
             buscar_contexto_fn=buscar_contexto,
@@ -325,10 +449,10 @@ async def process_chat(req: ChatRequest, _auth: None = Depends(_verificar_token)
             salvar_memoria_fn=salvar_memoria,
             falar_fn=falar,
         )
-        return {
+        payload = {
             "command_id": res.get("command_id"),
             "cancelled": res.get("cancelled", False),
-            "user_message": req.message,
+            "user_message": message_text,
             "response": res["response"],
             "context_used": res["context_used"],
             "tools_executed": res["tools_executed"],
@@ -336,6 +460,14 @@ async def process_chat(req: ChatRequest, _auth: None = Depends(_verificar_token)
             "audio_url": res["audio_url"],
             "played_locally": res["played_locally"],
         }
+        if use_encrypted_transport and e2ee_session is not None:
+            return {
+                "encrypted": True,
+                "e2ee": encrypt_chat_envelope(e2ee_session, payload),
+            }
+        return payload
+    except HTTPException:
+        raise
     except Exception as exc:
         _err = random.choice(_FRASES_ERRO)
         asyncio.ensure_future(loop.run_in_executor(None, lambda: falar(_err, output_path="erro.mp3")))
@@ -347,7 +479,8 @@ async def process_chat(req: ChatRequest, _auth: None = Depends(_verificar_token)
 async def voice_listen(
     duration: int = Query(5, ge=1, le=60),
     profile: str = Query(DEFAULT_PROFILE, description="Perfil de tokens: fryvis_beta (40), fryvis_1.0 (50), fryvis_recursive (80)"),
-    provider: str | None = Query(None, description="Provedor LLM: hybrid, ollama, gemini")
+    provider: str | None = Query(None, description="Provedor LLM: hybrid, ollama, gemini"),
+    _e2ee: E2EESessionRecord | None = Depends(require_e2ee_session),
 ) -> dict[str, Any]:
     """Grava áudio do microfone, transcreve com Whisper e processa na F.R.Y.I.Vs."""
     loop = asyncio.get_event_loop()
@@ -430,7 +563,11 @@ def get_voice_daemon_status() -> dict[str, Any]:
 
 
 @app.post("/api/voice/daemon")
-async def set_voice_daemon_status(req: VoiceDaemonRequest, _auth: None = Depends(_verificar_token)) -> dict[str, Any]:
+async def set_voice_daemon_status(
+    req: VoiceDaemonRequest,
+    _auth: None = Depends(_verificar_token),
+    _e2ee: E2EESessionRecord | None = Depends(require_e2ee_session),
+) -> dict[str, Any]:
     """Liga ou desliga a escuta contínua por wake word no servidor."""
     from core import voice_daemon
     if req.enabled:
@@ -444,7 +581,9 @@ async def set_voice_daemon_status(req: VoiceDaemonRequest, _auth: None = Depends
 
 
 @app.post("/api/voice/trigger")
-async def trigger_voice_wake() -> dict[str, Any]:
+async def trigger_voice_wake(
+    _e2ee: E2EESessionRecord | None = Depends(require_e2ee_session),
+) -> dict[str, Any]:
     """Aciona manualmente o modo 'Senhor?' do daemon de voz (botão de microfone)."""
     from core import voice_daemon
     acionado = voice_daemon.acionar_manual()
@@ -456,7 +595,10 @@ class MicMuteRequest(BaseModel):
 
 
 @app.post("/api/voice/mute")
-async def set_mic_mute(req: MicMuteRequest) -> dict[str, Any]:
+async def set_mic_mute(
+    req: MicMuteRequest,
+    _e2ee: E2EESessionRecord | None = Depends(require_e2ee_session),
+) -> dict[str, Any]:
     """
     Muta ou desmuta o sistema de voz sem encerrar o VoiceDaemon.
     Quando mutado: microfone descartado + TTS/áudio bloqueados.
@@ -477,7 +619,9 @@ def get_mic_mute_status() -> dict[str, Any]:
 
 
 @app.get("/api/audio/last")
-def get_last_audio() -> Any:
+def get_last_audio(
+    _e2ee: E2EESessionRecord | None = Depends(require_e2ee_session),
+) -> Any:
     """Compatibilidade legada: retorna resposta.mp3 mais recente."""
     audio_path = os.path.join(os.path.dirname(__file__), "resposta.mp3")
     if os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
@@ -488,16 +632,17 @@ def get_last_audio() -> Any:
                 "Cache-Control": "no-cache, no-store, must-revalidate",
                 "Pragma": "no-cache",
                 "Expires": "0",
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
-                "Accept-Ranges": "bytes"
+                "Accept-Ranges": "bytes",
             }
         )
     raise HTTPException(status_code=404, detail="Nenhum áudio disponível.")
 
 
 @app.get("/api/audio/{request_id}")
-def get_audio_by_id(request_id: str) -> Any:
+def get_audio_by_id(
+    request_id: str,
+    _e2ee: E2EESessionRecord | None = Depends(require_e2ee_session),
+) -> Any:
     """Serve áudio gerado para um request_id específico — sem colisão entre usuários concorrentes."""
     safe = request_id.replace("-", "").replace("_", "")
     if not safe.isalnum() or len(request_id) > 64:
@@ -510,10 +655,12 @@ def get_audio_by_id(request_id: str) -> Any:
         return FileResponse(
             candidate,
             media_type="audio/mpeg",
-            headers={"Cache-Control": "no-cache, no-store, must-revalidate",
-                     "Pragma": "no-cache", "Expires": "0",
-                     "Access-Control-Allow-Origin": "*",
-                     "Accept-Ranges": "bytes"},
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+                "Accept-Ranges": "bytes",
+            },
         )
     raise HTTPException(status_code=404, detail="Áudio não encontrado.")
 
@@ -548,7 +695,10 @@ def screen_status() -> dict[str, Any]:
 
 
 @app.get("/api/screen/stream")
-async def screen_stream(fps: int = Query(default=5, ge=1, le=15)) -> Any:
+async def screen_stream(
+    fps: int = Query(default=5, ge=1, le=15),
+    _e2ee: E2EESessionRecord | None = Depends(require_e2ee_session),
+) -> Any:
     """Stream MJPEG da tela em tempo real (use em <img src=...>)."""
     from fastapi.responses import StreamingResponse
 
@@ -572,13 +722,19 @@ async def screen_stream(fps: int = Query(default=5, ge=1, le=15)) -> Any:
 
 
 @app.get("/api/memory")
-def get_memories() -> dict[str, Any]:
+def get_memories(
+    _e2ee: E2EESessionRecord | None = Depends(require_e2ee_session),
+) -> dict[str, Any]:
     """Retorna o histórico de memórias gravadas no ChromaDB."""
     return {"memories": listar_memorias()}
 
 
 @app.delete("/api/memory/{memory_id}")
-def remove_memory(memory_id: str, _auth: None = Depends(_verificar_token)) -> dict[str, bool]:
+def remove_memory(
+    memory_id: str,
+    _auth: None = Depends(_verificar_token),
+    _e2ee: E2EESessionRecord | None = Depends(require_e2ee_session),
+) -> dict[str, bool]:
     """Remove uma memória específica pelo id."""
     ok = deletar_memoria(memory_id)
     return {"success": ok}
@@ -611,7 +767,10 @@ def search_skills_endpoint(
 
 
 @app.post("/api/commands/cancel")
-async def cancel_commands(command_id: str | None = None) -> dict[str, Any]:
+async def cancel_commands(
+    command_id: str | None = None,
+    _e2ee: E2EESessionRecord | None = Depends(require_e2ee_session),
+) -> dict[str, Any]:
     from core.command_queue import get_queue
     from core.audio_player import parar
     queue = get_queue()
@@ -623,7 +782,11 @@ async def cancel_commands(command_id: str | None = None) -> dict[str, Any]:
 
 
 @app.post("/api/skills/execute")
-async def direct_execute_skill(req: SkillExecuteRequest, _auth: None = Depends(_verificar_token)) -> dict[str, Any]:
+async def direct_execute_skill(
+    req: SkillExecuteRequest,
+    _auth: None = Depends(_verificar_token),
+    _e2ee: E2EESessionRecord | None = Depends(require_e2ee_session),
+) -> dict[str, Any]:
     """Executa diretamente uma skill pelo nome e argumentos."""
     from core.command_queue import get_queue
     resultado = await get_queue().run(lambda: asyncio.to_thread(execute_skill, req.skill, req.arguments))
@@ -637,7 +800,11 @@ def knowledge_status() -> dict[str, Any]:
 
 
 @app.post("/api/knowledge/reindex")
-async def knowledge_reindex(reset: bool = False, _auth: None = Depends(_verificar_token)) -> dict[str, Any]:
+async def knowledge_reindex(
+    reset: bool = False,
+    _auth: None = Depends(_verificar_token),
+    _e2ee: E2EESessionRecord | None = Depends(require_e2ee_session),
+) -> dict[str, Any]:
     """Re-indexa a base de conhecimento. Use reset=true para recriar do zero."""
     loop = asyncio.get_event_loop()
     novos = await loop.run_in_executor(None, lambda: kb_indexar(forcar=reset, verbose=True))
@@ -665,16 +832,33 @@ async def knowledge_search(
 
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket, token: str = Query(default="")) -> None:
+async def websocket_endpoint(
+    websocket: WebSocket,
+    token: str = Query(default=""),
+    e2ee_token: str = Query(default=""),
+) -> None:
     """Canal WebSocket para eventos e comunicação em tempo real.
 
-    Autenticação opcional via query param: ws://host/ws?token=<FRYIVS_API_TOKEN>
-    Sem FRYIVS_API_TOKEN configurado → conexão aceita (modo dev).
+    Exige:
+    - FRYIVS_API_TOKEN via query param `token` quando configurado (timing-safe com hmac.compare_digest)
+    - Sessão E2EE desbloqueada e token válido via `e2ee_token` ou header `X-E2EE-Session`
+      quando E2EE estiver ativo (fecha com código 4423 se bloqueado).
     """
     if _API_TOKEN:
         if not hmac.compare_digest(token.encode("utf-8"), _API_TOKEN.encode("utf-8")):
             await websocket.close(code=4401)
             return
+
+    ws_e2ee = extract_e2ee_token(
+        websocket.headers.get("x-e2ee-session", ""),
+        websocket.headers.get("authorization", ""),
+        e2ee_token,
+    )
+    if is_e2ee_required():
+        if not is_session_unlocked() or validate_session_token(ws_e2ee) is None:
+            await websocket.close(code=4423, reason="F.R.Y.I.Vs bloqueada (E2EE)")
+            return
+
     await manager.connect(websocket)
     try:
         await websocket.send_json({
@@ -684,6 +868,10 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(default=""
         })
         while True:
             data = await websocket.receive_json()
+            if is_e2ee_required():
+                if not is_session_unlocked() or validate_session_token(ws_e2ee) is None:
+                    await websocket.close(code=4423, reason="F.R.Y.I.Vs bloqueada (E2EE)")
+                    return
             event_type = data.get("type")
             if event_type == "ping":
                 await websocket.send_json({"type": "pong"})

@@ -45,6 +45,9 @@ def _em_teste() -> bool:
 
 def garantir_audio_senhor() -> str:
     """Gera e mantém em cache o áudio curto 'Senhor?' para resposta instantânea (~0ms TTS)."""
+    from core.e2ee_auth import is_session_unlocked
+    if not is_session_unlocked():
+        return ""
     os.makedirs(AUDIO_CACHE_DIR, exist_ok=True)
     if os.path.exists(SENHOR_MP3_PATH) and os.path.getsize(SENHOR_MP3_PATH) > 200:
         return SENHOR_MP3_PATH
@@ -158,8 +161,12 @@ class VoiceDaemon:
         return transcrever(audio, fs=SAMPLE_RATE, language="pt")
 
     def _default_tocar_senhor(self) -> None:
+        from core.e2ee_auth import is_session_unlocked
+        if not is_session_unlocked():
+            return
         caminho = garantir_audio_senhor()
-        audio_player.tocar(caminho, bloquear=True)
+        if caminho:
+            audio_player.tocar(caminho, bloquear=True)
 
     def _default_executar_comando(self, texto: str) -> None:
         pass
@@ -205,7 +212,10 @@ class VoiceDaemon:
         return False
 
     def escuta_habilitada(self) -> bool:
-        """Retorna True somente se a escuta estiver habilitada (não mutada, não falando e não processando)."""
+        """Retorna True somente se a escuta estiver habilitada (desbloqueada via E2EE, não mutada, não falando e não processando)."""
+        from core.e2ee_auth import is_session_unlocked
+        if not is_session_unlocked():
+            return False
         if _mute_state.is_muted():
             return False
         if self.esta_falando():
@@ -217,12 +227,18 @@ class VoiceDaemon:
     def acionar_manual(self) -> bool:
         """Acorda a FRYIVS imediatamente (ex.: botão de microfone na interface)."""
         if not self.escuta_habilitada():
-            print("[VoiceDaemon] Escuta manual não habilitada: IA ocupada falando ou processando.")
+            print("[VoiceDaemon] Escuta manual não habilitada: IA bloqueada (E2EE), mutada, falando ou processando.")
             return False
         self._gatilho_manual.set()
         return True
 
     def _entrar_modo_senhor(self) -> None:
+        from core.e2ee_auth import is_session_unlocked
+        if not is_session_unlocked():
+            self._resetar_captura()
+            self._pre_roll.clear()
+            self._mudar_estado("DORMINDO")
+            return
         self._mudar_estado("SENHOR_Q")
         status_overlay("Senhor? Estou ouvindo...", ativo=True, duracao=10.0)
         self._notificar({"type": "wake_detected", "response": "Senhor?"})
@@ -240,6 +256,13 @@ class VoiceDaemon:
         self._notificar({"type": "state_change", "state": "listening", "detail": "Ouvindo seu comando, senhor..."})
 
     def _executar_pedido(self, texto_comando: str) -> None:
+        from core.e2ee_auth import is_session_unlocked
+        if not is_session_unlocked():
+            self._resetar_captura()
+            self._pre_roll.clear()
+            self._stop_chunks.clear()
+            self._mudar_estado("DORMINDO")
+            return
         if not texto_comando or eh_alucinacao_whisper(texto_comando):
             print(f"[VoiceDaemon] Comando ignorado por filtro anti-alucinação: '{texto_comando}'")
             self._resetar_captura()
@@ -654,6 +677,7 @@ def stream_aberto() -> bool:
 
 
 def status() -> dict[str, Any]:
+    from core.e2ee_auth import is_session_unlocked
     oww_info = (
         _daemon_instance._oww_detector.status()
         if (_daemon_instance is not None and _daemon_instance._oww_detector is not None)
@@ -663,6 +687,7 @@ def status() -> dict[str, Any]:
         "active": ativo(),
         "stream_open": stream_aberto(),
         "muted": is_muted(),
+        "e2ee_locked": not is_session_unlocked(),
         "state": _daemon_instance.estado if _daemon_instance else "INATIVO",
         "threshold_rms": round(_daemon_instance.limiar_rms, 4) if _daemon_instance else 0.0,
         "openwakeword": oww_info,
@@ -694,7 +719,8 @@ def capturar_audio_do_buffer(duracao: int = 5, fs: int = SAMPLE_RATE) -> tuple[n
     Permite que chamadas diretas a `gravar_audio` capturem áudio sem abrir um 2º InputStream
     concorrente quando o daemon já está com o microfone aberto.
     """
-    if _daemon_instance is None:
+    from core.e2ee_auth import is_session_unlocked
+    if not is_session_unlocked() or _daemon_instance is None:
         return np.array([], dtype="float32"), fs
     max_s = min(float(duracao), 15.0)
     inicio = time.time()

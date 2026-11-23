@@ -1,7 +1,20 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import ParticleDrift from "@/components/ui/particle-drift";
 import { AIOrb } from "@/components/AIOrb";
 import type { AIOrbState, AIOrbModel } from "@/components/AIOrb/types";
+import { E2EELockGate } from "@/components/E2EELockGate";
+import {
+  appendE2EETokenToUrl,
+  buildE2EEHeaders,
+  decryptChatPayload,
+  encryptChatPayload,
+  fetchE2EEStatus,
+  getStoredE2EEToken,
+  lockE2EESession,
+  storeE2EEToken,
+  type E2EEEnvelope,
+  type E2EESession,
+} from "@/lib/e2ee";
 import {
   Mic,
   MicOff,
@@ -20,7 +33,6 @@ import {
   Sliders,
   Lock,
   Unlock,
-  KeyRound,
   ShieldCheck,
   X,
   ChevronDown,
@@ -63,9 +75,18 @@ export default function App() {
     try { localStorage.setItem("fryvis_orb_model", m); } catch {}
   };
 
-  const [isAdmin, setIsAdmin] = useState<boolean>(() => {
-    try { return sessionStorage.getItem("fryvis_admin_unlocked") === "true"; } catch { return false; }
-  });
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
+
+  // Estado E2EE (End-to-End Encryption Gate)
+  const [e2eeChecking, setE2eeChecking] = useState<boolean>(true);
+  const [e2eeRequired, setE2eeRequired] = useState<boolean>(true);
+  const [e2eeUnlocked, setE2eeUnlocked] = useState<boolean>(false);
+  const [e2eeHasPassword, setE2eeHasPassword] = useState<boolean>(true);
+  const [e2eeLockoutSecs, setE2eeLockoutSecs] = useState<number>(0);
+  const [e2eeSessionToken, setE2eeSessionToken] = useState<string | null>(() =>
+    getStoredE2EEToken(),
+  );
+  const e2eeSessionKeyRef = useRef<CryptoKey | null>(null);
 
   const [engineProvider, setEngineProvider] = useState<string>(() => {
     try { return localStorage.getItem("fryvis_engine_provider") || "gemini"; } catch { return "gemini"; }
@@ -188,11 +209,6 @@ export default function App() {
   const currentProfile =
     MODEL_PROFILES_CONFIG.find((p) => p.id === modelProfile) || MODEL_PROFILES_CONFIG[1];
 
-  const [showAdminModal, setShowAdminModal] = useState(false);
-  const [adminPasswordInput, setAdminPasswordInput] = useState("");
-  const [adminError, setAdminError] = useState("");
-  const [adminSuccess, setAdminSuccess] = useState("");
-
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -200,14 +216,65 @@ export default function App() {
   const dataArrayRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
   const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
 
+  const forceLocalLock = useCallback(() => {
+    e2eeSessionKeyRef.current = null;
+    storeE2EEToken(null);
+    setE2eeSessionToken(null);
+    setE2eeUnlocked(false);
+    setIsAdmin(false);
+    setAiState("idle");
+    setAudioLevel(0);
+    try {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.removeAttribute("src");
+      }
+    } catch {}
+    try {
+      if ("speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+    } catch {}
+  }, []);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   useEffect(() => {
+    let active = true;
+    const storedToken = getStoredE2EEToken();
+    fetchE2EEStatus(storedToken)
+      .then((e2eeSt) => {
+        if (!active) return;
+        setE2eeRequired(e2eeSt.required);
+        setE2eeHasPassword(e2eeSt.has_password_configured);
+        setE2eeLockoutSecs(e2eeSt.lockout_remaining_seconds || 0);
+        if (!e2eeSt.required) {
+          setE2eeUnlocked(true);
+        } else if (e2eeSt.unlocked && e2eeSt.session_valid && storedToken) {
+          setE2eeSessionToken(storedToken);
+          setE2eeUnlocked(true);
+        } else {
+          storeE2EEToken(null);
+          setE2eeSessionToken(null);
+          setE2eeUnlocked(false);
+        }
+      })
+      .catch(() => {
+        if (!active) return;
+        // Fail-closed: mantém bloqueado se não confirmar estado
+        setE2eeRequired(true);
+        setE2eeUnlocked(false);
+      })
+      .finally(() => {
+        if (active) setE2eeChecking(false);
+      });
+
     fetch("/api/status")
       .then((res) => res.json())
       .then((data) => {
+        if (!active) return;
         setStatus(data);
         if (typeof data.voice_daemon_active === "boolean") {
           setWakeWordActive(data.voice_daemon_active);
@@ -217,6 +284,10 @@ export default function App() {
         }
       })
       .catch((err) => console.error(err));
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -224,36 +295,61 @@ export default function App() {
   const wsReconnectDelay = useRef<number>(1000);
 
   useEffect(() => {
+    // Não abre WebSocket enquanto o núcleo E2EE estiver bloqueado
+    if (e2eeChecking || (e2eeRequired && (!e2eeUnlocked || !e2eeSessionToken))) {
+      if (wsReconnectTimerRef.current) {
+        clearTimeout(wsReconnectTimerRef.current);
+        wsReconnectTimerRef.current = null;
+      }
+      wsRef.current?.close();
+      wsRef.current = null;
+      setWsConnected(false);
+      return;
+    }
+
+    let disposed = false;
+
     function connectWs() {
+      if (disposed) return;
       if (wsReconnectTimerRef.current) {
         clearTimeout(wsReconnectTimerRef.current);
         wsReconnectTimerRef.current = null;
       }
       const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-      const wsUrl = `${protocol}//${location.host || "127.0.0.1:8000"}/ws`;
+      const baseWsUrl = `${protocol}//${location.host || "127.0.0.1:8000"}/ws`;
+      const wsUrl = appendE2EETokenToUrl(baseWsUrl, e2eeSessionToken);
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
         setWsConnected(true);
-        wsReconnectDelay.current = 1000; // reset backoff ao conectar com sucesso
+        wsReconnectDelay.current = 1000;
       };
 
-      ws.onclose = () => {
+      ws.onclose = (ev) => {
         setWsConnected(false);
         wsRef.current = null;
+        if (disposed) return;
+        if (ev.code === 4423) {
+          forceLocalLock();
+          return;
+        }
         const delay = wsReconnectDelay.current;
         wsReconnectDelay.current = Math.min(delay * 2, 30000);
         wsReconnectTimerRef.current = setTimeout(connectWs, delay);
       };
 
       ws.onerror = () => {
-        ws.close(); // dispara onclose → agenda reconexão
+        ws.close();
       };
 
       ws.onmessage = (e) => {
         try {
           const data = JSON.parse(e.data);
+          if (data.type === "e2ee_locked") {
+            forceLocalLock();
+            return;
+          }
           if (data.type === "state_change") {
             setAiState(data.state);
             if (data.state === "idle") setAudioLevel(0);
@@ -285,11 +381,12 @@ export default function App() {
     connectWs();
 
     return () => {
+      disposed = true;
       if (wsReconnectTimerRef.current) clearTimeout(wsReconnectTimerRef.current);
       wsRef.current?.close();
       wsRef.current = null;
     };
-  }, []);
+  }, [e2eeChecking, e2eeRequired, e2eeUnlocked, e2eeSessionToken, forceLocalLock]);
 
   const initAudioAnalyser = () => {
     if (!audioRef.current || audioContextRef.current) return;
@@ -404,49 +501,43 @@ export default function App() {
     }
   };
 
-  const handleAdminUnlock = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (adminPasswordInput.trim() === "fryivslendaria") {
-      setIsAdmin(true);
-      try { sessionStorage.setItem("fryvis_admin_unlocked", "true"); } catch {}
-      setAdminSuccess("Modo Administrador desbloqueado com sucesso!");
-      setAdminError("");
-      setTimeout(() => {
-        setShowAdminModal(false);
-        setAdminSuccess("");
-        setAdminPasswordInput("");
-      }, 800);
-    } else {
-      setAdminError("Senha incorreta. Acesso negado.");
-      setAdminSuccess("");
-    }
+  const handleE2EEUnlocked = (session: E2EESession) => {
+    e2eeSessionKeyRef.current = session.sessionKey;
+    setE2eeSessionToken(session.token);
+    setE2eeUnlocked(true);
+    setE2eeLockoutSecs(0);
   };
 
-  const handleAdminLock = () => {
-    setIsAdmin(false);
-    try { sessionStorage.removeItem("fryvis_admin_unlocked"); } catch {}
-    setShowAdminModal(false);
-    setAdminPasswordInput("");
-    setAdminError("");
-    setAdminSuccess("");
+  const handleLockAI = async () => {
+    const tokenToRevoke = e2eeSessionToken;
+    wsRef.current?.close();
+    wsRef.current = null;
+    forceLocalLock();
+    await lockE2EESession(tokenToRevoke);
   };
 
   const toggleMicMute = async () => {
+    if (e2eeRequired && !e2eeUnlocked) return;
     const novoMute = !micMuted;
-    setMicMuted(novoMute); // atualização otimista
+    setMicMuted(novoMute);
     try {
-      await fetch("/api/voice/mute", {
+      const res = await fetch("/api/voice/mute", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: buildE2EEHeaders(e2eeSessionToken, { "Content-Type": "application/json" }),
         body: JSON.stringify({ muted: novoMute }),
       });
+      if (res.status === 423) {
+        forceLocalLock();
+        setMicMuted(!novoMute);
+      }
     } catch {
-      setMicMuted(!novoMute); // reverte em falha
+      setMicMuted(!novoMute);
     }
   };
 
   const handleSend = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (e2eeRequired && !e2eeUnlocked) return;
     if (!input.trim()) return;
     const userMsg = input;
     const recentHistory = messages.slice(-8).map((m) => ({
@@ -460,19 +551,38 @@ export default function App() {
     setMessages((prev) => [...prev, { role: "user", text: userMsg, time: new Date().toLocaleTimeString() }]);
     setAiState("thinking");
     try {
+      const rawChatPayload = {
+        message: userMsg,
+        model_profile: modelProfile,
+        provider: engineProvider,
+        use_memory: true,
+        generate_speech: true,
+        history: recentHistory,
+      };
+
+      const sessionKey = e2eeSessionKeyRef.current;
+      const bodyObj =
+        sessionKey && e2eeSessionToken
+          ? { e2ee: await encryptChatPayload(sessionKey, rawChatPayload) }
+          : rawChatPayload;
+
       const res = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: userMsg,
-          model_profile: modelProfile,
-          provider: engineProvider,
-          use_memory: true,
-          generate_speech: true,
-          history: recentHistory,
-        }),
+        headers: buildE2EEHeaders(e2eeSessionToken, { "Content-Type": "application/json" }),
+        body: JSON.stringify(bodyObj),
       });
-      const data = await res.json();
+
+      if (res.status === 423) {
+        forceLocalLock();
+        return;
+      }
+
+      const rawData = await res.json();
+      const data =
+        rawData && rawData.encrypted && rawData.e2ee && sessionKey
+          ? await decryptChatPayload<any>(sessionKey, rawData.e2ee as E2EEEnvelope)
+          : rawData;
+
       if (data && data.response) {
         setMessages((prev) => [...prev, { role: "assistant", text: data.response, tools: data.tools_executed, time: new Date().toLocaleTimeString() }]);
       }
@@ -486,8 +596,8 @@ export default function App() {
           audioContextRef.current.resume().catch(() => {});
         }
         setAiState("speaking");
-        const audioSrc = data.audio_url || `/api/audio/last?v=${Date.now()}`;
-        audioRef.current.src = audioSrc;
+        const baseAudioSrc = data.audio_url || `/api/audio/last?v=${Date.now()}`;
+        audioRef.current.src = appendE2EETokenToUrl(baseAudioSrc, e2eeSessionToken);
 
         const audioTimer = setTimeout(() => {
           setAiState("idle");
@@ -536,12 +646,16 @@ export default function App() {
   const pararComandoAtivo = async () => {
     pararEscutaComando();
     try {
-      await fetch("/api/commands/cancel", { method: "POST" });
+      await fetch("/api/commands/cancel", {
+        method: "POST",
+        headers: buildE2EEHeaders(e2eeSessionToken),
+      });
     } catch {
     }
   };
 
   const handleVoice = async () => {
+    if (e2eeRequired && !e2eeUnlocked) return;
     if (aiState === "thinking" || aiState === "speaking") {
       return;
     }
@@ -554,17 +668,27 @@ export default function App() {
       return;
     }
     try {
-      await fetch("/api/voice/trigger", { method: "POST" });
+      const res = await fetch("/api/voice/trigger", {
+        method: "POST",
+        headers: buildE2EEHeaders(e2eeSessionToken),
+      });
+      if (res.status === 423) {
+        forceLocalLock();
+      }
     } catch {}
   };
 
   const executeSkill = async (skill: string, args: any = {}) => {
+    if (e2eeRequired && !e2eeUnlocked) return;
     try {
-      await fetch("/api/skills/execute", {
+      const res = await fetch("/api/skills/execute", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: buildE2EEHeaders(e2eeSessionToken, { "Content-Type": "application/json" }),
         body: JSON.stringify({ skill, arguments: args }),
       });
+      if (res.status === 423) {
+        forceLocalLock();
+      }
     } catch {}
   };
 
@@ -730,17 +854,39 @@ export default function App() {
 
             <div className="w-px h-5 bg-white/10 mx-0.5" />
 
+            {e2eeUnlocked && (
+              <div
+                title="Sessão protegida com E2EE (ECDH P-256 + HKDF-SHA256 + AES-256-GCM)"
+                className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/12 border border-emerald-400/30 text-emerald-300 text-[9px] font-mono tracking-wider shrink-0"
+              >
+                <ShieldCheck size={11} className="text-emerald-400 shrink-0" />
+                <span>E2EE</span>
+              </div>
+            )}
+
+            {e2eeRequired && e2eeUnlocked && (
+              <button
+                onClick={handleLockAI}
+                aria-label="Bloquear IA"
+                title="Bloquear IA imediatamente (corta voz, escuta e acesso E2EE)"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-red-500/15 hover:bg-red-500/25 border border-red-400/35 text-red-300 text-[10px] font-mono font-semibold transition-all cursor-pointer"
+              >
+                <Lock size={11} className="text-red-400 shrink-0" />
+                <span className="hidden sm:inline">Bloquear IA</span>
+              </button>
+            )}
+
             <button
-              onClick={() => { setAdminError(""); setAdminSuccess(""); setShowAdminModal(true); }}
-              aria-label={isAdmin ? "Administrador Ativo" : "Acesso de Administrador"}
-              className={`p-2 rounded-full transition-all ${
+              onClick={() => setIsAdmin((v) => !v)}
+              aria-label={isAdmin ? "Ocultar Controles Avançados" : "Mostrar Controles Avançados"}
+              className={`p-2 rounded-full transition-all cursor-pointer ${
                 isAdmin
                   ? "bg-amber-500/15 text-amber-300 border border-amber-500/30 shadow-[0_0_14px_rgba(245,158,11,0.2)] hover:bg-amber-500/25"
                   : "bg-black/55 border border-white/10 text-slate-500 hover:text-white hover:border-white/22 backdrop-blur-xl"
               }`}
-              title={isAdmin ? "Administrador Ativo" : "Acesso de Administrador"}
+              title={isAdmin ? "Controles Avançados Ativos (Sessão E2EE Verificada)" : "Ativar Controles Avançados (Sessão E2EE Verificada)"}
             >
-              {isAdmin ? <Unlock size={13} className="text-amber-400" /> : <Lock size={13} />}
+              {isAdmin ? <Unlock size={13} className="text-amber-400" /> : <Sliders size={13} />}
             </button>
 
             <button
@@ -1074,77 +1220,12 @@ export default function App() {
         )}
       </div>
 
-      {showAdminModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4">
-          <div className="relative w-full max-w-md bg-zinc-950/95 border border-blue-500/25 rounded-2xl p-6 shadow-2xl shadow-blue-500/8 font-mono text-sm">
-            <button
-              onClick={() => { setShowAdminModal(false); setAdminError(""); setAdminSuccess(""); setAdminPasswordInput(""); }}
-              className="absolute top-4 right-4 p-1.5 rounded-lg bg-white/4 hover:bg-white/10 text-slate-500 hover:text-white transition-colors"
-            >
-              <X size={15} />
-            </button>
-            <div className="flex items-center gap-3 mb-5">
-              <div className="p-3 rounded-xl bg-blue-500/8 border border-blue-500/15 text-blue-400">
-                <KeyRound size={20} />
-              </div>
-              <div>
-                <h3 className="text-sm font-bold text-white tracking-wide">Painel de Segurança</h3>
-                <p className="text-[11px] text-slate-500">{isAdmin ? "Modo Administrador Ativo" : "Autenticação Requerida"}</p>
-              </div>
-            </div>
-            {isAdmin ? (
-              <div className="space-y-4">
-                <div className="p-3.5 rounded-xl bg-amber-500/8 border border-amber-500/25 text-amber-200 text-xs flex items-center gap-2.5">
-                  <ShieldCheck className="text-amber-400 shrink-0" size={18} />
-                  <span>Acesso total liberado. Demo, barra de ferramentas e skills estão visíveis.</span>
-                </div>
-                <button
-                  onClick={handleAdminLock}
-                  className="w-full py-2.5 rounded-xl bg-red-600/15 hover:bg-red-600/25 border border-red-500/30 text-red-300 font-bold text-xs uppercase tracking-wider transition-colors"
-                >
-                  Bloquear Modo Administrador
-                </button>
-              </div>
-            ) : (
-              <form onSubmit={handleAdminUnlock} className="space-y-4">
-                <div>
-                  <label className="block text-[10px] uppercase text-slate-500 font-bold mb-1.5">Senha de Administrador</label>
-                  <input
-                    type="password"
-                    autoFocus
-                    value={adminPasswordInput}
-                    onChange={(e) => { setAdminPasswordInput(e.target.value); setAdminError(""); }}
-                    placeholder="Digite a senha..."
-                    className="w-full bg-black/60 border border-white/10 focus:border-blue-500/50 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-700 outline-none transition-all focus:shadow-[0_0_15px_rgba(59,130,246,0.25)]"
-                  />
-                </div>
-                {adminError && (
-                  <div className="text-xs text-red-400 bg-red-500/8 border border-red-500/15 rounded-lg px-3 py-2">{adminError}</div>
-                )}
-                {adminSuccess && (
-                  <div className="text-xs text-emerald-400 bg-emerald-500/8 border border-emerald-500/15 rounded-lg px-3 py-2 flex items-center gap-1.5">
-                    <ShieldCheck size={13} /> {adminSuccess}
-                  </div>
-                )}
-                <div className="flex gap-2 justify-end pt-1">
-                  <button
-                    type="button"
-                    onClick={() => { setShowAdminModal(false); setAdminError(""); setAdminPasswordInput(""); }}
-                    className="px-4 py-2 rounded-xl bg-white/4 hover:bg-white/8 text-slate-400 hover:text-white transition-colors text-xs"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shadow-lg shadow-blue-500/20 transition-all"
-                  >
-                    Desbloquear
-                  </button>
-                </div>
-              </form>
-            )}
-          </div>
-        </div>
+      {!e2eeChecking && e2eeRequired && !e2eeUnlocked && (
+        <E2EELockGate
+          hasPasswordConfigured={e2eeHasPassword}
+          initialLockoutSeconds={e2eeLockoutSecs}
+          onUnlocked={handleE2EEUnlocked}
+        />
       )}
     </div>
   );
