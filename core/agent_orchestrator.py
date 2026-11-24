@@ -31,7 +31,9 @@ import asyncio
 import hashlib
 import hmac
 import json
+import math
 import os
+import re
 import secrets
 import threading
 import time
@@ -528,9 +530,13 @@ def verify_hmac_signature(
     if not hmac.compare_digest(received.encode("utf-8"), expected.encode("utf-8")):
         return False, "Assinatura HMAC-SHA256 inválida."
 
-    # Proteção opcional contra replay de nonce dentro da janela
+    # Proteção anti-replay dentro da janela ±60s: rastreia atomicamente tanto a
+    # impressão digital da assinatura (`sig:<ts>:<sig>`) quanto o nonce (`nonce:<val>`),
+    # impedindo replay mesmo se X-Fryivs-Nonce for removido ou alterado pelo atacante.
     clean_nonce = (nonce_header or "").strip()
-    if clean_nonce and seen_nonces is not None:
+    if seen_nonces is not None:
+        sig_key = f"sig:{timestamp_header.strip()}:{received}"
+        nonce_key = f"nonce:{clean_nonce}" if clean_nonce else ""
         lock = nonce_lock or threading.Lock()
         with lock:
             expired_keys = [
@@ -538,14 +544,56 @@ def verify_hmac_signature(
             ]
             for k in expired_keys:
                 seen_nonces.pop(k, None)
-            if clean_nonce in seen_nonces:
-                return False, "Nonce já utilizado (tentativa de replay detectada)."
-            if len(seen_nonces) >= MAX_CACHED_NONCES:
+            if sig_key in seen_nonces or (nonce_key and nonce_key in seen_nonces):
+                return False, "Requisição/nonce já utilizado (tentativa de replay detectada)."
+            needed_slots = 2 if nonce_key else 1
+            while len(seen_nonces) + needed_slots > MAX_CACHED_NONCES and seen_nonces:
                 oldest = min(seen_nonces, key=lambda k: seen_nonces[k])
                 seen_nonces.pop(oldest, None)
-            seen_nonces[clean_nonce] = current_ts
+            seen_nonces[sig_key] = current_ts
+            if nonce_key:
+                seen_nonces[nonce_key] = current_ts
 
     return True, "OK"
+
+
+_EXTERNAL_KNOWLEDGE_CLOSE_TAG_RE: Final[re.Pattern[str]] = re.compile(
+    r"<\s*/\s*external_knowledge\s*>",
+    re.IGNORECASE,
+)
+
+
+def _neutralize_external_knowledge_tags(text: str) -> str:
+    """Neutraliza fechamentos `</external_knowledge>` embutidos no contexto externo."""
+    return _EXTERNAL_KNOWLEDGE_CLOSE_TAG_RE.sub("&lt;/external_knowledge&gt;", text)
+
+
+def _parse_int_field(value: Any, *, default: int = 0, field_name: str, non_negative: bool = False) -> int:
+    if value is None or value == "":
+        return default
+    if isinstance(value, bool):
+        raise ValueError(f"Campo '{field_name}' não pode ser booleano.")
+    try:
+        parsed = int(value)
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f"Campo numérico inválido '{field_name}': {value!r}") from exc
+    if non_negative and parsed < 0:
+        raise ValueError(f"Campo '{field_name}' não pode ser negativo.")
+    return parsed
+
+
+def _parse_float_field(value: Any, *, field_name: str, non_negative: bool = True) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f"Campo '{field_name}' não pode ser booleano.")
+    try:
+        parsed = float(value)
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f"Campo numérico inválido '{field_name}': {value!r}") from exc
+    if not math.isfinite(parsed):
+        raise ValueError(f"Campo '{field_name}' deve ser um número finito.")
+    if non_negative and parsed < 0.0:
+        raise ValueError(f"Campo '{field_name}' não pode ser negativo.")
+    return parsed
 
 
 # =============================================================================
@@ -952,12 +1000,13 @@ class AgentOrchestrator:
         ]
         if job.context.strip():
             trust_attr = "untrusted_data" if job.context_tainted else "verified_internal"
+            safe_context = _neutralize_external_knowledge_tags(job.context.strip())
             messages.append(
                 {
                     "role": "user",
                     "content": (
                         f'<external_knowledge trust="{trust_attr}">\n'
-                        f"{job.context.strip()}\n"
+                        f"{safe_context}\n"
                         f"</external_knowledge>\n\n"
                         f"Missão: {job.task}"
                     ),
@@ -1382,7 +1431,7 @@ class AgentOrchestrator:
 
     def handle_callback(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Processa callback autenticado via HMAC-SHA256 vindo do Hermes Agent ou n8n."""
-        hop_count = int(payload.get("hop_count", 0) or 0)
+        hop_count = _parse_int_field(payload.get("hop_count"), default=0, field_name="hop_count")
         self._budget.check_hop_count(hop_count)
 
         job_id = str(payload.get("job_id") or "").strip()
@@ -1390,13 +1439,29 @@ class AgentOrchestrator:
         cb_status = str(payload.get("status") or "completed").strip().lower()
         result_text = str(payload.get("result") or "")
         error_text = str(payload.get("error") or "")
-        tokens_used = max(0, int(payload.get("tokens_used", 0) or 0))
-        steps_completed = max(0, int(payload.get("steps_completed", 0) or 0))
+        tokens_used = _parse_int_field(
+            payload.get("tokens_used"),
+            default=0,
+            field_name="tokens_used",
+            non_negative=True,
+        )
+        steps_completed = _parse_int_field(
+            payload.get("steps_completed"),
+            default=0,
+            field_name="steps_completed",
+            non_negative=True,
+        )
         raw_usd = payload.get("estimated_usd")
         est_usd = (
-            max(0.0, float(raw_usd))
-            if raw_usd is not None
+            _parse_float_field(raw_usd, field_name="estimated_usd", non_negative=True)
+            if raw_usd is not None and raw_usd != ""
             else self._budget.estimate_usd(tokens_used)
+        )
+        progress_pct_val = _parse_int_field(
+            payload.get("progress_pct"),
+            default=50,
+            field_name="progress_pct",
+            non_negative=True,
         )
         artifacts = payload.get("artifacts")
         artifact_list = [str(a) for a in artifacts] if isinstance(artifacts, list) else []
@@ -1436,8 +1501,7 @@ class AgentOrchestrator:
                     job.progress_pct = 100
                     job.finished_at = time.time()
                 else:
-                    pct = int(payload.get("progress_pct", 50) or 50)
-                    job.progress_pct = max(0, min(99, pct))
+                    job.progress_pct = max(0, min(99, progress_pct_val))
                 corr_id = job.correlation_id
                 updated_job = job
             self._hermes_online = True
@@ -1747,7 +1811,7 @@ async def post_agents_callback(
 
     try:
         return orch.handle_callback(payload)
-    except HopLimitExceededError as exc:
+    except (HopLimitExceededError, ValueError, TypeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except BudgetGuardError as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
