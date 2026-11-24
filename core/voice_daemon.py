@@ -20,6 +20,7 @@ import asyncio
 import collections
 import os
 import queue
+import re
 import sys
 import threading
 import time
@@ -74,12 +75,14 @@ class VoiceDaemon:
         oww_detector: OpenWakeWordDetector | None = None,
         usar_openwakeword: bool | None = None,
         limiar_inicial: float = 0.045,
+        transcrever_interrupcao_fn: Callable[[np.ndarray], str] | None = None,
     ) -> None:
         self.estado: str = "DORMINDO"
         self.historico_estados: list[str] = ["DORMINDO"]
         self.limiar_rms: float = limiar_inicial
         self._ruido_amostras: list[float] = []
 
+        self._wake_fn_custom: bool = transcrever_wake_fn is not None
         self._transcrever_wake = transcrever_wake_fn or self._default_transcrever_wake
         self._transcrever_cmd = transcrever_cmd_fn or self._default_transcrever_cmd
         self._tocar_senhor = tocar_senhor_fn or self._default_tocar_senhor
@@ -119,7 +122,8 @@ class VoiceDaemon:
 
         self._stop_chunks: list = []
         self._stop_chunk_limit: int = 8
-        self._transcrever_interrupcao = self._default_transcrever_wake
+        self._transcrever_interrupcao = transcrever_interrupcao_fn or self._default_transcrever_wake
+        self.long_segment_seconds: float = 2.2
 
         self.min_wake_chunks = 4
         self.min_voz_ativa_chunks = 3
@@ -305,29 +309,71 @@ class VoiceDaemon:
         "stop", "cancela", "cancele", "basta",
     })
 
-    def _verificar_interrupcao(self) -> None:
-        """Verifica se chunks acumulados durante reprodução contêm palavra de parada.
+    def _limiar_barge_in(self) -> float:
+        """Limiar de energia elevado para barge-in durante reprodução (evita falsos positivos por eco)."""
+        return max(self.limiar_rms * 2.2, 0.065)
 
-        Usa transcrição rápida (modelo 'base') em segmentos de ≈ 800 ms.
+    def _barge_in_ativo(self) -> bool:
+        """Retorna True quando a IA está reproduzindo fala ativamente, desbloqueada (E2EE) e não mutada."""
+        from core.e2ee_auth import is_session_unlocked
+        if not is_session_unlocked():
+            return False
+        if _mute_state.is_muted():
+            return False
+        if self.estado == "SENHOR_Q":
+            return False
+        if not self.esta_falando():
+            return False
+        usar_player_global = (self._esta_tocando == audio_player.tocando)
+        return bool(
+            (self._esta_tocando and self._esta_tocando())
+            or _mute_state.is_speaking(check_audio_player=usar_player_global)
+        )
+
+    def _processar_chunk_barge_in(self, flat: np.ndarray) -> None:
+        """Acumula chunks acima do limiar elevado durante fala para acionar `_verificar_interrupcao`."""
+        limiar = self._limiar_barge_in()
+        if _rms(flat) >= limiar:
+            self._stop_chunks.append(flat)
+            if len(self._stop_chunks) >= self._stop_chunk_limit:
+                self._verificar_interrupcao()
+                self._stop_chunks.clear()
+        elif self._stop_chunks:
+            if len(self._stop_chunks) >= 3:
+                self._verificar_interrupcao()
+            self._stop_chunks.clear()
+
+    def _verificar_interrupcao(self) -> None:
+        """Verifica se chunks acumulados durante reprodução contêm palavra de parada (barge-in).
+
+        Usa limiar elevado (`max(limiar_rms * 2.2, 0.065)`) para rejeitar eco das caixas de som
+        enquanto permite interromper a fala com 'pare', 'chega', 'stop', etc.
         Nunca chamado de dentro do callback sounddevice.
-        Validação acústica em ambiente real: pendente.
         """
         if not self._stop_chunks:
             return
         try:
             audio_seg = np.concatenate(self._stop_chunks)
-            if _rms(audio_seg) < max(self.limiar_rms, 0.04):
+            if _rms(audio_seg) < self._limiar_barge_in():
+                return
+            # Em testes unitários que mockaram apenas `transcrever_wake_fn` sem mockar
+            # `_transcrever_interrupcao` nem `transcrever`, evita carregar Whisper real do disco.
+            if (
+                _em_teste()
+                and self._wake_fn_custom
+                and self._transcrever_interrupcao == self._default_transcrever_wake
+                and getattr(transcrever, "__module__", "") == "core.stt"
+            ):
                 return
             texto = self._transcrever_interrupcao(audio_seg)
             if not texto:
                 return
-            tokens = set(
-                texto.lower().replace(",", "").replace(".", "").replace("!", "").split()
-            )
+            tokens = set(re.sub(r"[^\w\s]", " ", texto.lower()).split())
             if tokens & self._STOP_WORDS:
-                print(f"[VoiceDaemon] Interrupção por voz detectada: '{texto}'")
+                print(f"[VoiceDaemon] Interrupção por voz (barge-in) detectada: '{texto}'")
                 from core import audio_player as _ap
                 _ap.parar()
+                self._notificar({"type": "barge_in", "text": texto})
                 try:
                     if _event_loop is not None:
                         asyncio.run_coroutine_threadsafe(
@@ -347,7 +393,10 @@ class VoiceDaemon:
         if not self.escuta_habilitada():
             self._resetar_captura()
             self._pre_roll.clear()
-            self._stop_chunks.clear()
+            if self._barge_in_ativo():
+                self._processar_chunk_barge_in(flat)
+            else:
+                self._stop_chunks.clear()
             return
         if self._stop_chunks:
             self._stop_chunks.clear()
@@ -436,7 +485,13 @@ class VoiceDaemon:
                     return
 
                 self._mudar_estado("VERIFICANDO")
-                texto = self._transcrever_wake(audio_seg)
+                duracao_seg = len(audio_seg) / float(SAMPLE_RATE)
+                usou_transcricao_completa = False
+                if duracao_seg > self.long_segment_seconds and not self._wake_fn_custom:
+                    texto = self._transcrever_cmd(audio_seg)
+                    usou_transcricao_completa = True
+                else:
+                    texto = self._transcrever_wake(audio_seg)
                 if eh_alucinacao_whisper(texto):
                     if self._oww_detector is not None:
                         self._oww_detector.reset()
@@ -452,15 +507,18 @@ class VoiceDaemon:
 
                 print(
                     f"[VoiceDaemon] Wake word detectada (openWakeWord={oww_max_score:.2f}, "
-                    f"STT='{texto}', resto='{resto}')"
+                    f"STT='{texto}', resto='{resto}', dur={duracao_seg:.2f}s)"
                 )
                 if self._oww_detector is not None:
                     self._oww_detector.reset()
 
                 if comando_util(resto):
-                    texto_completo = self._transcrever_cmd(audio_seg) or texto
-                    _, resto_refinado = contem_nome(texto_completo)
-                    pedido_final = resto_refinado if comando_util(resto_refinado) else resto
+                    if usou_transcricao_completa:
+                        pedido_final = resto
+                    else:
+                        texto_completo = self._transcrever_cmd(audio_seg) or texto
+                        _, resto_refinado = contem_nome(texto_completo)
+                        pedido_final = resto_refinado if comando_util(resto_refinado) else resto
                     self._executar_pedido(pedido_final)
                 else:
                     self._entrar_modo_senhor()

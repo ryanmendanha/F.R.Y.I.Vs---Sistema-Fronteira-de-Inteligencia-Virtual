@@ -1,6 +1,11 @@
 """
-Módulo de interação com o modelo de linguagem (LLM via Ollama) para F.R.Y.I.Vs.
-Integra busca semântica de skills via ChromaDB (SkillRouter), suporte a ferramentas e histórico.
+Módulo de interação com o motor cognitivo (Gemini Cloud / Ollama) da F.R.Y.I.Vs.
+Integra:
+- Roteamento Dual-Process System 1 / System 2 (`core.cognitive_router`).
+- Loop ReAct Multi-Step controlado + execução paralela + auto-correção (`core.agent_loop`).
+- Busca semântica de skills via ChromaDB (`core.skill_router`).
+- Proteção contra Indirect Prompt Injection (`<external_knowledge trust="untrusted_data">` fora de `role: "system"`).
+- Failover híbrido completo preservando tools entre Ollama e Gemini.
 """
 
 from __future__ import annotations
@@ -12,10 +17,21 @@ import unicodedata
 from typing import Any, Final
 from dotenv import load_dotenv
 
+from core.agent_loop import extract_tool_call, run_agent_loop
+from core.cognitive_router import (
+    CognitiveRouteDecision,
+    classify_cognitive_mode,
+    is_short_action_command,
+)
+from core.gemini_client import (
+    UNTRUSTED_DATA_CONSTITUTION,
+    ask_gemini,
+    is_gemini_configured,
+    wrap_external_knowledge,
+)
+from core.gptcache_manager import get_cached_response, cache_response
 from core.skill_router import get_skill_router
 from skills import ALL_SKILL_SCHEMAS, execute_skill
-from core.gemini_client import ask_gemini, is_gemini_configured
-from core.gptcache_manager import get_cached_response, cache_response
 
 load_dotenv()
 MODEL: Final[str] = os.getenv("OLLAMA_MODEL", "llama3.2")
@@ -98,6 +114,12 @@ MODEL_PROFILES: Final[dict[str, dict[str, Any]]] = {
 }
 DEFAULT_PROFILE: Final[str] = "fryvis_1.0"
 
+_SYSTEM2_PROMPT_INSTRUCTION: Final[str] = (
+    "Modo deliberativo System 2 ativo: analise todas as etapas necessárias com rigor, "
+    "encadeie ferramentas quando preciso, consolide os resultados obtidos e entregue uma resposta "
+    "completa, estruturada e clara ao senhor."
+)
+
 _SKILL_RESPONSE_TEMPLATES: dict[str, str] = {
     "abrir_programa":     "{resultado}",
     "listar_janelas":      "Janelas ativas detectadas, senhor:\n{resultado}",
@@ -147,9 +169,11 @@ _TECH_WHITELIST: frozenset[str] = frozenset({
     "ctrl", "alt", "cmd", "win", "shift", "tab", "esc", "f1", "f2", "f3", "f4", "f5",
     "f11", "f12", "del", "wt", "calc", "yt", "ps", "kill", "cd", "ls", "dir", "ip",
     "ping", "cls", "clear", "help", "code", "run", "web", "app", "pc", "cpu", "ram",
-    "whatsapp", "spotify", "chrome", "edge", "print", "screenshot",
+    "bateria", "status", "n8n", "hermes", "agentes", "agente", "workflow", "workflows",
+    "mcp", "rag", "llm", "tts", "stt", "ocr", "sql", "api", "wsl", "ssh", "git", "npm",
+    "usd", "brl", "whatsapp", "spotify", "chrome", "edge", "print", "screenshot",
     "xlsx", "xls", "docx", "doc", "pdf", "txt", "csv", "json", "xml", "py",
-    "planilha", "word", "excel", "powerpoint", "arquivo", "pasta", "documento"
+    "planilha", "word", "excel", "powerpoint", "arquivo", "pasta", "documento",
 })
 
 
@@ -165,7 +189,7 @@ _SELF_IDENTITY_PATTERNS: frozenset[str] = frozenset({
     "conte sobre voce", "me fale sobre voce", "quem te criou",
     "o que significa seu nome", "o que significa fryvis",
     "significado do seu nome", "significado de fryvis",
-    "qual o significado de fryvis", "sobre voce", "sua origem", "sua criacao"
+    "qual o significado de fryvis", "sobre voce", "sua origem", "sua criacao",
 })
 
 
@@ -248,7 +272,7 @@ def _is_direct_time_date_query(text: str) -> bool:
 
 _ACTION_AND_COMMAND_TOKENS: tuple[str, ...] = (
     "abr", "fech", "minim", "maxim", "digit", "press", "screenshot",
-    "volume", "janela", "programa", "listar",
+    "volume", "janela", "programa", "listar", "liste",
     "inicia", "inici", "rodar", "roda", "rode",
     "lanca", "lance", "aciona", "execut", "execu",
     "start", "open", "launch",
@@ -256,21 +280,29 @@ _ACTION_AND_COMMAND_TOKENS: tuple[str, ...] = (
     "discord", "steam", "calc", "explorer", "cmd", "powershell",
     "terminal", "vscode", "code", "word", "excel", "paint", "taskmgr",
     "hora", "horas", "data", "tempo", "clima", "google", "youtube", "print",
-    "adicion", "remov", "edit", "cliqu", "clic", "leia", "ler", "crie", "criar", "pesquis",
-    "busqu", "busca", "procur", "naveg", "acess", "entr",
+    "adicion", "remov", "edit", "cliqu", "clic", "leia", "ler", "crie", "criar",
+    "gere", "gerar", "pesquis", "busqu", "busca", "procur", "naveg", "acess", "entr",
     "link", "site", "pagina", "rolar", "role", "volte", "voltar", "desca", "suba",
     "primeiro", "segundo", "terceiro", "quarto", "quinto", "video", "aba", "resultado",
     "planilha", "documento", "arquivo", "pasta", "agend", "mapa", "grafo", "http", "www",
+    "bateria", "status", "cpu", "ram", "disco", "telemetria",
+    "n8n", "hermes", "agente", "agentes", "workflow", "webhook", "deleg",
 )
 
 
 def _is_conversational(text: str) -> bool:
-    """Detecta se o texto é uma saudação / mensagem conversacional sem comando de sistema."""
+    """
+    Detecta se o texto é uma saudação / mensagem conversacional sem comando de sistema.
+    Comandos curtos como 'bateria', 'status', 'cpu', 'ram', 'n8n', 'hermes', 'agentes'
+    NUNCA são marcados como conversacionais.
+    """
     normalized = _normalize(text.strip())
     clean_norm = re.sub(r"[^\w\s]", " ", normalized)
     clean_norm = re.sub(r"\s+", " ", clean_norm).strip()
     if _is_asking_about_self(text) or _is_asking_about_companies(text):
         return True
+    if is_short_action_command(text):
+        return False
     if any(v in clean_norm for v in _ACTION_AND_COMMAND_TOKENS):
         return False
     for kw in _CONVERSATIONAL_KEYWORDS:
@@ -281,7 +313,7 @@ def _is_conversational(text: str) -> bool:
             or f" {kw} " in f" {clean_norm} "
         ):
             return True
-    words = normalized.split()
+    words = clean_norm.split()
     if len(words) <= 2:
         return True
     return False
@@ -301,7 +333,8 @@ def _is_gibberish(text: str) -> bool:
         "planilha", "word", "documento", "arquivo", "pasta", "despesa", "relatorio",
         "quanto", "quem", "qual", "como", "onde", "quando", "horas", "hora", "data",
         "link", "resultado", "site", "pagina", "role", "rolar", "clique", "clicar",
-        "primeiro", "segundo", "terceiro", "volte", "voltar", "video"
+        "primeiro", "segundo", "terceiro", "volte", "voltar", "video",
+        "bateria", "status", "n8n", "hermes", "agentes", "agente", "workflow",
     )):
         return False
 
@@ -331,26 +364,8 @@ def _is_gibberish(text: str) -> bool:
 
 
 def _extract_tool_call(tool: Any) -> tuple[str, dict[str, Any]]:
-    """
-    Extrai (nome, argumentos) de um tool_call do Ollama.
-    Suporta tanto objetos com atributos (.function) quanto dicionários ({"function": ...}).
-    """
-    if hasattr(tool, "function"):
-        func = tool.function
-        name = getattr(func, "name", "") or ""
-        raw_args = getattr(func, "arguments", {}) or {}
-    else:
-        func = tool.get("function", {}) if isinstance(tool, dict) else {}
-        name = func.get("name", "") if isinstance(func, dict) else ""
-        raw_args = func.get("arguments", {}) if isinstance(func, dict) else {}
-
-    if isinstance(raw_args, str):
-        try:
-            raw_args = json.loads(raw_args)
-        except (json.JSONDecodeError, ValueError):
-            raw_args = {}
-
-    return name, raw_args if isinstance(raw_args, dict) else {}
+    """Extrai (nome, argumentos) de um tool_call do Ollama ou Gemini."""
+    return extract_tool_call(tool)
 
 
 def _message_to_dict(message: Any) -> dict[str, Any]:
@@ -380,7 +395,12 @@ def _garantir_tratamento_honroso(texto: str) -> str:
         flags=re.IGNORECASE,
     )
 
-    if not t.endswith((".", "!", "?")):
+    is_structured_or_data = (
+        "\n" in t
+        or t.endswith(("%", ")", "]", '"', "'", "`"))
+        or t[-1].isdigit()
+    )
+    if not is_structured_or_data and not t.endswith((".", "!", "?")):
         last_punct = max(t.rfind("."), t.rfind("!"), t.rfind("?"))
         if last_punct > 20:
             t = t[:last_punct + 1].strip()
@@ -391,7 +411,7 @@ def _garantir_tratamento_honroso(texto: str) -> str:
                 t = f"{base}."
 
     if "senhor" in t.lower():
-        if not t.endswith((".", "!", "?")):
+        if not t.endswith((".", "!", "?", "`", ")")):
             return f"{t}."
         return t
 
@@ -405,6 +425,175 @@ def _garantir_tratamento_honroso(texto: str) -> str:
         return f"{t}, senhor."
 
 
+def _build_system_instruction(
+    is_conversational: bool,
+    is_asking_self: bool,
+    profile_data: dict[str, Any],
+    route: CognitiveRouteDecision,
+) -> str:
+    """Monta a instrução de sistema sem jamais incluir dados externos/RAG."""
+    system_inst = CONVERSATIONAL_PROMPT if is_conversational else SYSTEM_PROMPT
+    if route.mode == "system2":
+        system_inst += f"\nDiretriz cognitiva: {_SYSTEM2_PROMPT_INSTRUCTION}"
+    else:
+        system_inst += f"\nDiretriz de extensão obrigatória: {profile_data['prompt_instruction']}"
+    if is_asking_self:
+        system_inst += (
+            "\nInstrução prioritária de apresentação: O usuário está perguntando sobre você. "
+            "Apresente-se como F.R.Y.I.Vs e declare expressamente que seu nome significa 'Sistema Fronteira de Inteligência Virtual'. "
+            "Conclua sua resposta de forma honrosa e completa, tratando sempre o usuário como 'senhor'."
+        )
+    return system_inst
+
+
+def _resolve_available_tools(
+    prompt: str,
+    tools: list[dict[str, Any]] | None,
+    is_conversational: bool,
+    enable_semantic_skill_routing: bool,
+    route: CognitiveRouteDecision,
+) -> list[dict[str, Any]]:
+    if is_conversational:
+        return []
+    if tools is not None:
+        return tools
+    if enable_semantic_skill_routing:
+        router = get_skill_router()
+        if route.mode == "system2":
+            return router.search_relevant_skills(prompt, top_k=8, threshold=0.55)
+        return router.search_relevant_skills(prompt, top_k=4, threshold=0.50)
+    return ALL_SKILL_SCHEMAS
+
+
+def _make_fast_template_fn(route: CognitiveRouteDecision):
+    """
+    Cria callback de resposta instantânea (System 1) para uma única skill OS/sistema
+    com template determinístico. Retorna None em System 2, buscas web ou múltiplas tools
+    para que o loop ReAct devolva as observações ao LLM.
+    """
+    def _fast_template(step_tools: list[dict[str, Any]], _step_text: str) -> str | None:
+        if route.mode == "system2":
+            return None
+        if len(step_tools) != 1:
+            return None
+        tool_name = step_tools[0]["tool"]
+        if tool_name == "pesquisar_informacao_web":
+            return None
+        template = _SKILL_RESPONSE_TEMPLATES.get(tool_name)
+        if not template:
+            return None
+        return template.format(resultado=step_tools[0]["result"])
+
+    return _fast_template
+
+
+def _build_react_followup_prompt(original_prompt: str, loop_messages: list[dict[str, Any]], allow_tools: bool) -> str:
+    """Constrói prompt estruturado com as observações das ferramentas para etapas 2+ no Gemini."""
+    obs_lines: list[str] = []
+    correction_notes: list[str] = []
+    for msg in loop_messages[1:]:
+        role = msg.get("role")
+        if role == "tool":
+            obs_lines.append(f"- Ferramenta `{msg.get('name', 'tool')}` retornou: {msg.get('content', '')}")
+        elif role == "user" and str(msg.get("content", "")).startswith("[Auto-Correção"):
+            correction_notes.append(str(msg.get("content", "")))
+
+    observations_block = "\n".join(obs_lines)
+    correction_block = ("\n\n" + "\n".join(correction_notes)) if correction_notes else ""
+
+    if allow_tools:
+        directive = (
+            "Com base nas observações acima, se ainda houver próxima etapa pendente ou correção "
+            "necessária, chame a próxima ferramenta adequada; caso contrário, responda de forma "
+            "clara, completa e polida ao senhor consolidando todos os resultados."
+        )
+    else:
+        directive = (
+            "Todas as ferramentas já foram executadas. Consolide todas as observações acima "
+            "e responda diretamente ao pedido original de forma clara, completa e honrosa ao senhor."
+        )
+
+    return (
+        f"Pedido original do usuário: {original_prompt}\n\n"
+        f"Observações das ferramentas já executadas:\n{observations_block}"
+        f"{correction_block}\n\n{directive}"
+    )
+
+
+def _run_gemini_with_loop(
+    *,
+    prompt: str,
+    system_inst: str,
+    context: str,
+    conversation_history: list[dict[str, str]] | None,
+    available_tools: list[dict[str, Any]],
+    num_predict: int,
+    route: CognitiveRouteDecision,
+) -> tuple[str, list[dict[str, Any]]]:
+    """Executa Gemini com suporte completo a System 1 fast-path e System 2 ReAct loop."""
+    synth_tokens = max(num_predict, 350 if route.mode == "system2" else 160)
+
+    def _gemini_step(loop_messages: list[dict[str, Any]], step: int, allow_tools: bool) -> tuple[str, list[dict[str, Any]]]:
+        step_tools = available_tools if (allow_tools and available_tools) else None
+        if step == 1:
+            return ask_gemini(
+                prompt=prompt,
+                system_instruction=system_inst,
+                context=context,
+                conversation_history=conversation_history,
+                max_tokens=num_predict,
+                temperature=0.2,
+                tools=step_tools if step_tools is not None else [],
+            )
+
+        followup_prompt = _build_react_followup_prompt(prompt, loop_messages, allow_tools=allow_tools)
+        return ask_gemini(
+            prompt=followup_prompt,
+            system_instruction=system_inst,
+            context=context,
+            conversation_history=conversation_history,
+            max_tokens=synth_tokens,
+            temperature=0.3 if not allow_tools else 0.2,
+            tools=step_tools,
+        )
+
+    result = run_agent_loop(
+        prompt=prompt,
+        llm_step_fn=_gemini_step,
+        execute_tool_fn=execute_skill,
+        max_steps=route.max_steps,
+        max_wall_time_s=60.0,
+        max_error_retries=1,
+        max_workers=3,
+        extract_tool_call_fn=_extract_tool_call,
+        fast_template_fn=_make_fast_template_fn(route),
+    )
+    return result.response, result.executed_tools
+
+
+def _parse_ollama_tool_calls(
+    message_dict: dict[str, Any],
+    available_tools: list[dict[str, Any]],
+) -> list[Any]:
+    tool_calls = list(message_dict.get("tool_calls") or [])
+    content_text = (message_dict.get("content") or "").strip()
+    if not tool_calls and content_text.startswith("{") and content_text.endswith("}"):
+        try:
+            parsed_json = json.loads(content_text)
+            fn_name = parsed_json.get("name") or parsed_json.get("function")
+            fn_args = parsed_json.get("parameters") or parsed_json.get("arguments") or {}
+            if fn_name and any(t.get("function", {}).get("name") == fn_name for t in available_tools):
+                tool_calls = [{
+                    "function": {
+                        "name": fn_name,
+                        "arguments": fn_args,
+                    }
+                }]
+        except Exception:
+            pass
+    return tool_calls
+
+
 def ask_fryvis(
     prompt: str,
     context: str = "",
@@ -416,16 +605,11 @@ def ask_fryvis(
     provider: str | None = None
 ) -> tuple[str, list[dict[str, Any]]]:
     """
-    Envia uma mensagem para o LLM (Ollama ou Gemini Cloud) com suporte a perfis de modelo por tokens,
-    histórico, contexto, tools e failover híbrido inteligente.
-    Perfis suportados:
-      - 'fryvis_beta': 40 tokens (ultra-sucinto)
-      - 'fryvis_1.0': 50 tokens (objetivo)
-      - 'fryvis_recursive': 80 tokens (refinado)
-    Provedores suportados:
-      - 'hybrid': Tenta Ollama local e, se falhar ou estiver offline, usa Gemini Flash Cloud.
-      - 'gemini': Usa diretamente o Gemini Cloud (Google AI Studio).
-      - 'ollama': Usa estritamente o Ollama local.
+    Envia uma mensagem para o motor cognitivo (Gemini Cloud ou Ollama) com:
+    - Classificação Dual-Process System 1 / System 2 (`core.cognitive_router`).
+    - Loop ReAct Multi-Step + ferramentas paralelas + auto-correção (`core.agent_loop`).
+    - Isolamento anti-prompt-injection (`<external_knowledge trust="untrusted_data">` fora de system).
+    - Failover híbrido completo preservando `tools` entre provedores.
     """
     active_provider = (provider or LLM_PROVIDER).lower()
 
@@ -450,106 +634,72 @@ def ask_fryvis(
             "result": resultado_hd,
         }]
 
+    route = classify_cognitive_mode(prompt, profile=profile, context=context)
     is_conversational = _is_conversational(prompt)
     is_asking_self = _is_asking_about_self(prompt)
     profile_data = MODEL_PROFILES.get(profile, MODEL_PROFILES[DEFAULT_PROFILE])
 
+    # Teto dinâmico de tokens: System 1 preserva perfis concisos (40/50/80); System 2 eleva para 350-800
     if max_tokens is not None and max_tokens > 0:
         _num_predict = max_tokens
+    elif route.mode == "system2":
+        _num_predict = route.suggested_max_tokens
+    elif profile == "fryvis_recursive" and not is_conversational:
+        _num_predict = 400
     else:
         _num_predict = profile_data["tokens"]
 
-    if is_conversational and not tools:
+    can_use_gptcache = (
+        is_conversational
+        and not tools
+        and route.mode == "system1"
+        and not context
+        and not conversation_history
+    )
+    if can_use_gptcache:
         cached_resp = get_cached_response(prompt)
         if cached_resp:
             print(f"[GPTCache] Resposta recuperada instantaneamente do cache para: '{prompt[:40]}'")
             return _garantir_tratamento_honroso(cached_resp), []
 
+    system_inst = _build_system_instruction(
+        is_conversational=is_conversational,
+        is_asking_self=is_asking_self,
+        profile_data=profile_data,
+        route=route,
+    )
+
+    available_tools = _resolve_available_tools(
+        prompt=prompt,
+        tools=tools,
+        is_conversational=is_conversational,
+        enable_semantic_skill_routing=enable_semantic_skill_routing,
+        route=route,
+    )
+
     if active_provider in ("gemini", "hybrid"):
-        system_inst = (CONVERSATIONAL_PROMPT if is_conversational else SYSTEM_PROMPT)
-        system_inst += f"\nDiretriz de extensão obrigatória: {profile_data['prompt_instruction']}"
-        if is_asking_self:
-            system_inst += (
-                "\nInstrução prioritária de apresentação: O usuário está perguntando sobre você. "
-                "Apresente-se como F.R.Y.I.Vs e declare expressamente que seu nome significa 'Sistema Fronteira de Inteligência Virtual'. "
-                "Conclua sua resposta de forma honrosa e completa, tratando sempre o usuário como 'senhor'."
-            )
-
-        if is_conversational:
-            available_gemini_tools = []
-        elif tools is not None:
-            available_gemini_tools = tools
-        elif enable_semantic_skill_routing:
-            router = get_skill_router()
-            available_gemini_tools = router.search_relevant_skills(prompt, top_k=4, threshold=0.50)
-        else:
-            available_gemini_tools = ALL_SKILL_SCHEMAS
-
         try:
-            gemini_resp, gemini_tool_calls = ask_gemini(
+            gemini_resp, executed_tools = _run_gemini_with_loop(
                 prompt=prompt,
-                system_instruction=system_inst,
+                system_inst=system_inst,
                 context=context,
                 conversation_history=conversation_history,
-                max_tokens=_num_predict,
-                temperature=0.2,
-                tools=available_gemini_tools
+                available_tools=available_tools,
+                num_predict=_num_predict,
+                route=route,
             )
 
-            if gemini_tool_calls:
-                executed_tools: list[dict[str, Any]] = []
-                for tool in gemini_tool_calls:
-                    func_name, func_args = _extract_tool_call(tool)
-                    print(f"[Gemini Primary] Executando skill: {func_name}({func_args})")
-                    resultado = execute_skill(func_name, func_args)
-                    print(f"[Gemini Primary] Resultado: {resultado}")
-                    executed_tools.append({
-                        "tool": func_name,
-                        "arguments": func_args,
-                        "result": resultado,
-                    })
-
-                is_web_search = any(t["tool"] == "pesquisar_informacao_web" for t in executed_tools)
-                last_tool_name = executed_tools[-1]["tool"]
-                last_result = executed_tools[-1]["result"]
-
-                if not is_web_search and last_tool_name in _SKILL_RESPONSE_TEMPLATES:
-                    resp_direta = _SKILL_RESPONSE_TEMPLATES[last_tool_name].format(resultado=last_result)
-                    return _garantir_tratamento_honroso(resp_direta), executed_tools
-
-                if not gemini_resp or not gemini_resp.strip() or is_web_search:
-                    detalhes = "; ".join(f"{t['tool']}: {t['result']}" for t in executed_tools)
-                    if is_web_search:
-                        prompt_sintese = (
-                            f"Pergunta original do usuário: '{prompt}'.\n"
-                            f"Informações obtidas na internet: {detalhes}.\n"
-                            "Responda à pergunta do usuário de forma clara, completa e refinada utilizando esses dados, "
-                            "sempre tratando o usuário com o vocativo 'senhor'."
-                        )
-                        tok_limit = 140
-                    else:
-                        prompt_sintese = f"Ação executada no sistema: {detalhes}. Responda ao senhor confirmando a conclusão com honra e cortesia em português."
-                        tok_limit = 60
-
-                    try:
-                        sintese, _ = ask_gemini(
-                            prompt=prompt_sintese,
-                            system_instruction=system_inst,
-                            max_tokens=tok_limit,
-                            temperature=0.3
-                        )
-                        if sintese and not sintese.startswith("Erro:") and not sintese.startswith("Não foi possível obter resposta"):
-                            gemini_resp = sintese
-                        else:
-                            gemini_resp = _SKILL_RESPONSE_TEMPLATES.get(last_tool_name, "{resultado}").format(resultado=last_result)
-                    except Exception:
-                        gemini_resp = _SKILL_RESPONSE_TEMPLATES.get(last_tool_name, "{resultado}").format(resultado=last_result)
-
+            if executed_tools:
                 return _garantir_tratamento_honroso(gemini_resp), executed_tools
 
-            if gemini_resp and not gemini_resp.startswith("Erro:") and not gemini_resp.startswith("Não foi possível obter resposta"):
+            if (
+                gemini_resp
+                and not gemini_resp.startswith("Erro:")
+                and not gemini_resp.startswith("Não foi possível obter resposta")
+            ):
                 texto_formatado = _garantir_tratamento_honroso(gemini_resp)
-                cache_response(prompt, texto_formatado)
+                if can_use_gptcache:
+                    cache_response(prompt, texto_formatado)
                 return texto_formatado, []
 
             print(f"[LLM] Gemini Principal indisponível ({gemini_resp}). Realizando fallback para o motor secundário (Ollama)...")
@@ -561,90 +711,109 @@ def ask_fryvis(
     except ImportError:
         return "Erro: A biblioteca 'ollama' não está instalada no ambiente, senhor.", []
 
-    messages: list[dict[str, Any]] = [{
+    # Construção segura de mensagens Ollama: contexto SEMPRE fora de `role: "system"`
+    base_messages: list[dict[str, Any]] = [{
         "role": "system",
-        "content": CONVERSATIONAL_PROMPT if is_conversational else SYSTEM_PROMPT
+        "content": CONVERSATIONAL_PROMPT if is_conversational else SYSTEM_PROMPT,
     }]
 
-    messages.append({
-        "role": "system",
-        "content": f"Diretriz de extensão obrigatória: {profile_data['prompt_instruction']}"
-    })
+    if route.mode == "system2":
+        base_messages.append({
+            "role": "system",
+            "content": f"Diretriz cognitiva: {_SYSTEM2_PROMPT_INSTRUCTION}",
+        })
+    else:
+        base_messages.append({
+            "role": "system",
+            "content": f"Diretriz de extensão obrigatória: {profile_data['prompt_instruction']}",
+        })
 
     if is_asking_self:
-        messages.append({
+        base_messages.append({
             "role": "system",
             "content": (
                 "Instrução prioritária de apresentação: O usuário está perguntando sobre você. "
                 "Apresente-se como F.R.Y.I.Vs e declare expressamente que seu nome significa 'Sistema Fronteira de Inteligência Virtual'. "
                 "Conclua sua resposta de forma honrosa e completa, tratando sempre o usuário como 'senhor'."
-            )
+            ),
         })
 
-    if context:
-        messages.append({
+    wrapped_context = wrap_external_knowledge(context)
+    if wrapped_context:
+        base_messages.append({
             "role": "system",
-            "content": f"Memória / Contexto relevante recuperado:\n{context}"
+            "content": UNTRUSTED_DATA_CONSTITUTION,
         })
 
     if conversation_history:
         for msg in conversation_history[-6:]:
-            messages.append(msg)
+            base_messages.append(msg)
 
-    messages.append({"role": "user", "content": prompt})
+    user_content = f"{wrapped_context}\n\n{prompt}" if wrapped_context else prompt
+    base_messages.append({"role": "user", "content": user_content})
 
-    if is_conversational:
-        available_tools: list = []
-    elif tools is not None:
-        available_tools = tools
-    elif enable_semantic_skill_routing:
-        router = get_skill_router()
-        available_tools = router.search_relevant_skills(prompt, top_k=4, threshold=0.50)
-    else:
-        available_tools = ALL_SKILL_SCHEMAS
+    # Quando há ferramentas disponíveis, eleva num_predict para >= 350 evitando truncamento de JSON
+    _ollama_num_predict = max(_num_predict, 350) if available_tools else _num_predict
 
-    executed_tools: list[dict[str, Any]] = []
-
-    if available_tools:
-        _ollama_num_predict = 100
-    else:
-        _ollama_num_predict = _num_predict
-
-    try:
+    def _ollama_step(
+        loop_messages: list[dict[str, Any]],
+        step: int,
+        allow_tools: bool,
+    ) -> tuple[str, list[dict[str, Any]]]:
+        step_predict = (
+            max(_ollama_num_predict, 350)
+            if (step > 1 or route.mode == "system2" or available_tools)
+            else _ollama_num_predict
+        )
         chat_kwargs: dict[str, Any] = {
             "model": MODEL,
-            "messages": messages,
+            "messages": loop_messages,
             "options": {
-                "temperature": 0.2,
+                "temperature": 0.2 if allow_tools else 0.3,
                 "top_p": 0.9,
-                "num_predict": _ollama_num_predict,
-            }
+                "num_predict": step_predict,
+            },
         }
-        if available_tools:
+        if allow_tools and available_tools:
             chat_kwargs["tools"] = available_tools
 
         response = ollama.chat(**chat_kwargs)
+        raw_message = response.message if hasattr(response, "message") else response.get("message", {})
+        message_dict = _message_to_dict(raw_message)
+        step_tool_calls = _parse_ollama_tool_calls(message_dict, available_tools) if allow_tools else []
+        print(
+            f"[LLM] Ollama step {step} | mode={route.mode} | tool_calls={len(step_tool_calls)} | "
+            f"tools={[t.get('function', {}).get('name') for t in available_tools]}"
+        )
+        return (message_dict.get("content", "") or "").strip(), step_tool_calls
+
+    try:
+        loop_result = run_agent_loop(
+            prompt=prompt,
+            llm_step_fn=_ollama_step,
+            execute_tool_fn=execute_skill,
+            max_steps=route.max_steps,
+            max_wall_time_s=60.0,
+            max_error_retries=1,
+            max_workers=3,
+            extract_tool_call_fn=_extract_tool_call,
+            initial_messages=base_messages,
+            fast_template_fn=_make_fast_template_fn(route),
+        )
     except Exception as e:
         err_msg = str(e)
         if is_gemini_configured():
-            print(f"[LLM Fallback] Ollama indisponível ({err_msg}). Acionando fallback automático para Gemini Cloud...")
-            system_inst = (CONVERSATIONAL_PROMPT if is_conversational else SYSTEM_PROMPT)
-            system_inst += f"\nDiretriz de extensão obrigatória: {profile_data['prompt_instruction']}"
-            if is_asking_self:
-                system_inst += (
-                    "\nInstrução prioritária de apresentação: O usuário está perguntando sobre você. "
-                    "Apresente-se como F.R.Y.I.Vs e declare expressamente que seu nome significa 'Sistema Fronteira de Inteligência Virtual'. "
-                    "Conclua sua resposta de forma honrosa e completa, tratando sempre o usuário como 'senhor'."
-                )
-            gemini_resp, _ = ask_gemini(
+            print(f"[LLM Fallback] Ollama indisponível ({err_msg}). Acionando fallback automático para Gemini Cloud (preservando {len(available_tools)} tools)...")
+            gemini_resp, gemini_tools = _run_gemini_with_loop(
                 prompt=prompt,
-                system_instruction=system_inst,
+                system_inst=system_inst,
                 context=context,
                 conversation_history=conversation_history,
-                max_tokens=_num_predict,
-                temperature=0.2
+                available_tools=available_tools,
+                num_predict=_num_predict,
+                route=route,
             )
-            return _garantir_tratamento_honroso(gemini_resp), []
+            return _garantir_tratamento_honroso(gemini_resp), gemini_tools
 
         if "connection refused" in err_msg.lower() or "connect" in err_msg.lower():
             return (
@@ -654,73 +823,11 @@ def ask_fryvis(
             )
         return f"Erro ao comunicar com Ollama ({MODEL}): {err_msg}", []
 
-    raw_message = response.message if hasattr(response, "message") else response.get("message", {})
-    message_dict = _message_to_dict(raw_message)
+    if loop_result.executed_tools:
+        return _garantir_tratamento_honroso(loop_result.response), loop_result.executed_tools
 
-    tool_calls = message_dict.get("tool_calls") or []
-
-    content_text = (message_dict.get("content") or "").strip()
-    if not tool_calls and content_text.startswith("{") and content_text.endswith("}"):
-        try:
-            parsed_json = json.loads(content_text)
-            fn_name = parsed_json.get("name") or parsed_json.get("function")
-            fn_args = parsed_json.get("parameters") or parsed_json.get("arguments") or {}
-            if fn_name and any(t.get("function", {}).get("name") == fn_name for t in available_tools):
-                tool_calls = [{
-                    "function": {
-                        "name": fn_name,
-                        "arguments": fn_args
-                    }
-                }]
-        except Exception:
-            pass
-
-    print(f"[LLM] tool_calls detectados: {len(tool_calls)} | tools enviadas: {[t.get('function', {}).get('name') for t in available_tools]}")
-
-    if tool_calls:
-        messages.append(message_dict)
-
-        for tool in tool_calls:
-            func_name, func_args = _extract_tool_call(tool)
-            print(f"[LLM] Executando skill: {func_name}({func_args})")
-
-            resultado = execute_skill(func_name, func_args)
-            print(f"[LLM] Resultado: {resultado}")
-
-            executed_tools.append({
-                "tool": func_name,
-                "arguments": func_args,
-                "result": resultado,
-            })
-
-            messages.append({
-                "role": "tool",
-                "content": str(resultado),
-            })
-
-        _FALHA_KEYWORDS = (
-            "não encontrada no registro", "erro ao executar", "erro:", "exception",
-            "falha ao criar", "falha ao editar"
-        )
-        falhas = [
-            str(t.get("result", ""))
-            for t in executed_tools
-            if any(kw in str(t.get("result", "")).lower() for kw in _FALHA_KEYWORDS)
-        ]
-
-        if falhas:
-            return f"Não foi possível concluir o comando: {'; '.join(falhas)}, senhor.", executed_tools
-
-        template = _SKILL_RESPONSE_TEMPLATES.get(func_name)
-        if template:
-            resp_final = template.format(resultado=resultado)
-        else:
-            resp_final = f"Protocolo executado com sucesso, senhor. {resultado}"
-
-        print(f"[LLM] Resposta gerada por template local (sem 2ª chamada LLM): '{func_name}'")
-        return _garantir_tratamento_honroso(resp_final), executed_tools
-
-    raw_resp = (message_dict.get("content", "") or "").strip()
+    raw_resp = (loop_result.response or "").strip()
     texto_final = _garantir_tratamento_honroso(raw_resp) if raw_resp else "Às suas ordens, senhor."
-    cache_response(prompt, texto_final)
+    if can_use_gptcache:
+        cache_response(prompt, texto_final)
     return texto_final, []
