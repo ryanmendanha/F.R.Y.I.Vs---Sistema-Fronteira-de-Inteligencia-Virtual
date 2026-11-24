@@ -1,8 +1,11 @@
 """
-Estado de sessão em tempo real da F.R.Y.I.Vs ("Modo Supercomputador").
+Estado de sessão em tempo real da F.R.Y.I.Vs ("Modo Supercomputador" v3).
 
-Mantém de forma thread-safe:
-1. Histórico unificado de conversação (voz + chat web), limitado aos últimos turnos.
+Mantém de forma thread-safe e persistente via `core.memory_v3` SQLite (`data/sessions.db`):
+1. Histórico unificado de conversação (voz + chat web), expandido para 16 mensagens
+   (8 pares) em memória e até 20 turnos persistidos em SQLite (sobrevive reinícios).
+   Em ambiente `PYTEST_CURRENT_TEST`, opera em armazenamento isolado em memória para
+   nunca poluir o arquivo real `data/sessions.db`.
 2. Artefatos ativos por categoria (planilha Excel, documento Word, página Web) e o
    último artefato manipulado, permitindo comandos contínuos sem precisar repetir
    o nome do arquivo (ex.: "adicione uma linha com Mouse, 3 unidades").
@@ -14,40 +17,134 @@ import threading
 import time
 from typing import Any, Final
 
-MAX_TURNOS_HISTORICO: Final[int] = 8
+from core.memory_v3 import (
+    DEFAULT_MAX_SESSION_TURNS,
+    MemoryV3Store,
+    get_default_store,
+)
+
+MAX_TURNOS_HISTORICO: Final[int] = 16
+DEFAULT_LIMITE_HISTORICO: Final[int] = 8
+DEFAULT_SESSION_ID: Final[str] = "default"
 
 _lock = threading.Lock()
 _historico: list[dict[str, str]] = []
+_hidratado: bool = False
+_store_override: MemoryV3Store | None = None
 _artefato_atual: dict[str, Any] | None = None
 _artefatos_por_tipo: dict[str, dict[str, Any]] = {}
 
 
-def registrar_turno(mensagem_usuario: str, resposta_assistente: str) -> None:
-    """Registra um par de interação (usuário -> assistente) no histórico da sessão."""
+def _get_store() -> MemoryV3Store:
+    """Retorna o store SQLite ativo (em memória durante pytest, `data/sessions.db` em runtime)."""
+    if _store_override is not None:
+        return _store_override
+    return get_default_store()
+
+
+def configurar_store(store: MemoryV3Store | None) -> None:
+    """Configura um `MemoryV3Store` específico (usado em testes de persistência em disco)."""
+    global _store_override, _hidratado
+    with _lock:
+        _store_override = store
+        _historico.clear()
+        _hidratado = False
+
+
+def _hidratar_locked(session_id: str = DEFAULT_SESSION_ID) -> None:
+    """Carrega histórico persistido do SQLite na primeira leitura após boot/reload."""
+    global _hidratado
+    if _hidratado or session_id != DEFAULT_SESSION_ID:
+        return
+    _hidratado = True
+    try:
+        turns = _get_store().get_session_turns(session_id=session_id, limit=MAX_TURNOS_HISTORICO)
+        if turns:
+            _historico.clear()
+            for t in turns[-MAX_TURNOS_HISTORICO:]:
+                _historico.append({"role": str(t["role"]), "content": str(t["content"])})
+    except Exception:
+        pass
+
+
+def registrar_turno(
+    mensagem_usuario: str,
+    resposta_assistente: str,
+    session_id: str = DEFAULT_SESSION_ID,
+) -> None:
+    """Registra um par de interação (usuário -> assistente) em memória e no SQLite."""
     u = (mensagem_usuario or "").strip()
     a = (resposta_assistente or "").strip()
     if not u and not a:
         return
     with _lock:
-        if u:
-            _historico.append({"role": "user", "content": u})
-        if a:
-            _historico.append({"role": "assistant", "content": a})
-        if len(_historico) > MAX_TURNOS_HISTORICO:
-            del _historico[:-MAX_TURNOS_HISTORICO]
+        if session_id == DEFAULT_SESSION_ID:
+            _hidratar_locked(session_id)
+            if u:
+                _historico.append({"role": "user", "content": u})
+            if a:
+                _historico.append({"role": "assistant", "content": a})
+            if len(_historico) > MAX_TURNOS_HISTORICO:
+                del _historico[:-MAX_TURNOS_HISTORICO]
+        try:
+            _get_store().append_exchange(
+                session_id=session_id,
+                user_content=u,
+                assistant_content=a,
+                max_turns=DEFAULT_MAX_SESSION_TURNS,
+            )
+        except Exception:
+            pass
 
 
-def obter_historico(limite: int = MAX_TURNOS_HISTORICO) -> list[dict[str, str]]:
-    """Retorna cópia dos últimos turnos do histórico."""
+def obter_historico(
+    limite: int = DEFAULT_LIMITE_HISTORICO,
+    session_id: str = DEFAULT_SESSION_ID,
+) -> list[dict[str, str]]:
+    """
+    Retorna cópia dos últimos turnos do histórico.
+    Por compatibilidade retroativa, `limite` padrão é 8 mensagens; passe
+    `limite=MAX_TURNOS_HISTORICO` (16) ou `limite=20` para obter a janela completa.
+    """
+    if limite <= 0:
+        return []
     with _lock:
-        if limite <= 0:
-            return []
+        if session_id != DEFAULT_SESSION_ID or limite > MAX_TURNOS_HISTORICO:
+            try:
+                turns = _get_store().get_session_turns(session_id=session_id, limit=limite)
+                if turns or session_id != DEFAULT_SESSION_ID:
+                    return [{"role": str(t["role"]), "content": str(t["content"])} for t in turns]
+            except Exception:
+                pass
+        _hidratar_locked(session_id)
         return [dict(m) for m in _historico[-limite:]]
 
 
-def mesclar_historico(historico_externo: list[dict[str, str]] | None) -> list[dict[str, str]]:
+def recarregar_sessao(session_id: str = DEFAULT_SESSION_ID) -> list[dict[str, str]]:
     """
-    Se o cliente enviou histórico explícito não-vazio, normaliza e usa;
+    Descarta o cache em RAM e recarrega os turnos persistidos do SQLite
+    (útil na inicialização ou para validar sobrevivência após reinício).
+    """
+    global _hidratado
+    with _lock:
+        if session_id == DEFAULT_SESSION_ID:
+            _historico.clear()
+            _hidratado = False
+            _hidratar_locked(session_id)
+            return [dict(m) for m in _historico]
+        try:
+            turns = _get_store().get_session_turns(session_id=session_id, limit=MAX_TURNOS_HISTORICO)
+            return [{"role": str(t["role"]), "content": str(t["content"])} for t in turns]
+        except Exception:
+            return []
+
+
+def mesclar_historico(
+    historico_externo: list[dict[str, str]] | None,
+    session_id: str = DEFAULT_SESSION_ID,
+) -> list[dict[str, str]]:
+    """
+    Se o cliente enviou histórico explícito não-vazio, normaliza e usa (até 16 mensagens);
     caso contrário, retorna o histórico acumulado na sessão do servidor.
     """
     if historico_externo:
@@ -60,7 +157,7 @@ def mesclar_historico(historico_externo: list[dict[str, str]] | None) -> list[di
                     normalizado.append({"role": role, "content": content})
         if normalizado:
             return normalizado
-    return obter_historico()
+    return obter_historico(limite=MAX_TURNOS_HISTORICO, session_id=session_id)
 
 
 def registrar_artefato(
@@ -143,13 +240,23 @@ def contexto_para_llm() -> str:
         return "\n".join(partes)
 
 
-def limpar_sessao() -> None:
-    """Limpa o histórico e artefatos ativos (usado em testes)."""
+def limpar_sessao(
+    session_id: str = DEFAULT_SESSION_ID,
+    limpar_persistencia: bool = True,
+) -> None:
+    """Limpa o histórico e artefatos ativos (e a sessão persistida no store ativo)."""
     with _lock:
-        global _artefato_atual
-        _historico.clear()
-        _artefatos_por_tipo.clear()
-        _artefato_atual = None
+        global _artefato_atual, _hidratado
+        if session_id == DEFAULT_SESSION_ID:
+            _historico.clear()
+            _artefatos_por_tipo.clear()
+            _artefato_atual = None
+            _hidratado = True
+        if limpar_persistencia:
+            try:
+                _get_store().clear_session(session_id=session_id)
+            except Exception:
+                pass
 
 
 limpar = limpar_sessao
