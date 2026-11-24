@@ -317,7 +317,57 @@ SKILL_SEMANTIC_PROFILES: Final[dict[str, dict[str, str]]] = {
             "atualizar mapa do codigo reindexar grafo graphify atualizar arquitetura "
             "recarregar mapa mental reindexar codigo rebuild code graph"
         )
-    }
+    },
+    "disparar_workflow_n8n": {
+        "description": "Dispara um workflow corporativo no n8n (briefing, alerta, status ou automação externa) via webhook assinado com HMAC-SHA256 e proteção SSRF.",
+        "intents": (
+            "disparar workflow n8n acionar workflow n8n executar fluxo n8n rodar automacao n8n "
+            "chamar webhook n8n enviar briefing n8n disparar alerta n8n trigger n8n workflow"
+        )
+    },
+    "listar_workflows_n8n": {
+        "description": "Lista os workflows cadastrados e ativos na instância n8n corporativa, com filtro opcional por tag.",
+        "intents": (
+            "listar workflows n8n quais workflows n8n mostrar fluxos n8n ver automacoes n8n "
+            "workflows ativos no n8n list n8n workflows"
+        )
+    },
+    "consultar_execucoes_n8n": {
+        "description": "Consulta o histórico de execuções recentes de workflows no n8n (status success, error, running, waiting).",
+        "intents": (
+            "consultar execucoes n8n historico de execucoes n8n logs do n8n verificar execucoes n8n "
+            "ultimas execucoes workflow n8n status execucao n8n list n8n executions"
+        )
+    },
+    "delegar_missao_hermes": {
+        "description": "Delega uma missão longa ou especializada em segundo plano para um subagente Hermes Agent (pesquisador, engenheiro, analista ou sentinela).",
+        "intents": (
+            "delegar missao hermes delegar tarefa para agente acionar subagente hermes "
+            "mandar agente pesquisador engenheiro analista sentinela executar em segundo plano "
+            "orquestrar subagente delegate hermes mission"
+        )
+    },
+    "consultar_status_agentes": {
+        "description": "Consulta o status das missões delegadas aos subagentes Hermes, consumo do Budget Guard (tokens/USD, concorrência) e aprovações Tier 3 pendentes.",
+        "intents": (
+            "consultar status agentes status dos agentes status do hermes como estao os agentes "
+            "missoes em andamento orcamento budget guard aprovacoes pendentes tier 3 check agent status"
+        )
+    },
+    "cancelar_missao_agente": {
+        "description": "Cancela uma missão específica do Hermes Agent ou aciona o Kill-Switch de emergência para encerrar todos os agentes ativos.",
+        "intents": (
+            "cancelar missao agente cancelar job hermes parar agente encerrar agentes "
+            "kill switch kill all abortar missao subagente cancel agent job"
+        )
+    },
+    "listar_perfis_hermes": {
+        "description": "Lista os 4 perfis especialistas do Hermes Agent (pesquisador, engenheiro, analista e sentinela), suas ferramentas e sandboxes.",
+        "intents": (
+            "listar perfis hermes quais perfis hermes quais subagentes existem "
+            "mostrar agentes especialistas perfis disponiveis hermes list hermes profiles"
+        )
+    },
 }
 
 
@@ -523,6 +573,54 @@ SKILL_KEYWORD_RULES: Final[dict[str, list[str]]] = {
     "atualizar_mapa_codigo": [
         "atualizar mapa", "reindexar grafo", "reindexar codigo", "atualizar grafo",
         "recarregar mapa", "atualizar mapa mental"
+    ],
+    "disparar_workflow_n8n": [
+        "disparar workflow", "dispare o workflow", "acionar workflow", "acione o workflow",
+        "executar workflow", "execute o workflow", "rodar workflow", "rode o workflow",
+        "workflow n8n", "fluxo n8n", "fluxo no n8n", "automacao n8n", "automacao no n8n",
+        "webhook n8n", "briefing n8n", "briefing no n8n", "disparar n8n", "dispare no n8n",
+        "acionar n8n", "rodar no n8n", "chamar n8n"
+    ],
+    "listar_workflows_n8n": [
+        "listar workflows", "liste os workflows", "quais workflows", "mostrar workflows",
+        "mostre os workflows", "ver workflows", "workflows do n8n", "workflows no n8n",
+        "workflows n8n", "workflows ativos", "listar fluxos n8n", "quais fluxos n8n"
+    ],
+    "consultar_execucoes_n8n": [
+        "consultar execucoes", "consulte as execucoes", "execucoes n8n", "execucoes do n8n",
+        "execucoes no n8n", "historico n8n", "historico do n8n", "historico de execucoes",
+        "ultimas execucoes n8n", "ultimas execucoes do n8n", "status das execucoes",
+        "logs do n8n", "logs n8n", "ver execucoes"
+    ],
+    "delegar_missao_hermes": [
+        "delegar missao", "delegue a missao", "delegue uma missao", "delegar tarefa",
+        "delegue a tarefa", "delegar para o hermes", "delegar ao hermes", "delegar para agente",
+        "delegar ao agente", "mandar o hermes", "mande o hermes", "pedir ao hermes",
+        "acionar hermes", "acionar subagente", "subagente pesquisador", "subagente engenheiro",
+        "subagente analista", "subagente sentinela", "agente pesquisador", "agente engenheiro",
+        "agente analista", "agente sentinela", "perfil pesquisador", "perfil engenheiro",
+        "perfil analista", "perfil sentinela", "missao hermes", "missao para o hermes",
+        "delegar para o pesquisador", "delegar para o engenheiro",
+        "delegar para o analista", "delegar para o sentinela"
+    ],
+    "consultar_status_agentes": [
+        "status dos agentes", "status de agentes", "status do hermes", "status hermes",
+        "consultar agentes", "consultar status dos agentes", "como estao os agentes",
+        "agentes ativos", "missoes ativas", "missoes em andamento", "orcamento dos agentes",
+        "budget guard", "budget dos agentes", "aprovacoes pendentes", "aprovacoes tier 3",
+        "status da missao", "progresso do agente", "progresso da missao"
+    ],
+    "cancelar_missao_agente": [
+        "cancelar missao", "cancele a missao", "cancelar agente", "cancele o agente",
+        "cancelar job", "cancele o job", "parar agente", "pare o agente",
+        "parar agentes", "pare os agentes", "encerrar agentes", "encerre os agentes",
+        "encerrar todos os agentes", "matar agentes", "kill switch", "kill-switch",
+        "kill all", "abortar missao", "aborte a missao", "abortar agente"
+    ],
+    "listar_perfis_hermes": [
+        "listar perfis hermes", "perfis hermes", "perfis do hermes", "quais perfis",
+        "perfis de agentes", "perfis especialistas", "quais agentes", "quais subagentes",
+        "listar agentes", "listar subagentes", "agentes disponiveis", "subagentes disponiveis"
     ],
 }
 
@@ -806,6 +904,178 @@ class SkillRouter:
             if prim_g in matched_names:
                 matched_names.remove(prim_g)
             matched_names.insert(0, prim_g)
+            matched_schemas = [
+                self._schemas_by_name[name]
+                for name in matched_names
+                if name in self._schemas_by_name
+            ]
+            return matched_schemas[:top_k]
+
+        _is_n8n_execucoes = (
+            any(k in q_lower for k in (
+                "consultar execucoes", "consulte as execucoes", "execucoes n8n",
+                "execucoes do n8n", "execucoes no n8n", "historico n8n", "historico do n8n",
+                "historico de execucoes", "ultimas execucoes n8n", "ultimas execucoes do n8n",
+                "status das execucoes", "logs do n8n", "logs n8n", "ver execucoes",
+            ))
+            or (
+                "n8n" in q_lower
+                and any(w in q_lower for w in ("execuc", "historico", "log", "erros", "falhas"))
+            )
+        )
+        _is_n8n_listar = (
+            not _is_n8n_execucoes
+            and (
+                any(k in q_lower for k in (
+                    "listar workflows", "liste os workflows", "quais workflows",
+                    "mostrar workflows", "mostre os workflows", "ver workflows",
+                    "workflows ativos", "listar fluxos n8n", "quais fluxos n8n",
+                ))
+                or (
+                    any(k in q_lower for k in ("n8n", "workflow"))
+                    and any(w in q_lower for w in ("listar", "liste", "quais", "mostrar", "mostre", "ativos", "cadastrados"))
+                )
+            )
+        )
+        _is_n8n_disparar = (
+            not _is_n8n_execucoes
+            and not _is_n8n_listar
+            and (
+                any(k in q_lower for k in (
+                    "disparar workflow", "dispare o workflow", "acionar workflow", "acione o workflow",
+                    "executar workflow", "execute o workflow", "rodar workflow", "rode o workflow",
+                    "workflow n8n", "fluxo n8n", "fluxo no n8n", "automacao n8n", "automacao no n8n",
+                    "webhook n8n", "briefing n8n", "briefing no n8n", "disparar n8n", "dispare no n8n",
+                    "acionar n8n", "rodar no n8n", "chamar n8n",
+                ))
+                or (
+                    any(k in q_lower for k in ("n8n", "workflow"))
+                    and any(w in q_lower for w in ("dispar", "acion", "execut", "rodar", "rode", "chamar", "chame", "enviar", "envie", "briefing", "alerta", "webhook", "trigger"))
+                )
+                or (
+                    "n8n" in q_lower
+                    and not any(w in q_lower for w in ("o que e ", "quem criou", "como funciona"))
+                )
+            )
+        )
+        _is_n8n = _is_n8n_execucoes or _is_n8n_listar or _is_n8n_disparar
+        if _is_n8n:
+            if _is_n8n_execucoes:
+                prim_n8n = "consultar_execucoes_n8n"
+            elif _is_n8n_listar:
+                prim_n8n = "listar_workflows_n8n"
+            else:
+                prim_n8n = "disparar_workflow_n8n"
+            for n8n_skill in ("disparar_workflow_n8n", "listar_workflows_n8n", "consultar_execucoes_n8n"):
+                if n8n_skill not in matched_names:
+                    matched_names.append(n8n_skill)
+            if prim_n8n in matched_names:
+                matched_names.remove(prim_n8n)
+            matched_names.insert(0, prim_n8n)
+            for falso_pos in ("abrir_programa", "pesquisar_informacao_web", "pesquisar_google", "pesquisar_na_web"):
+                if falso_pos in matched_names:
+                    matched_names.remove(falso_pos)
+            matched_schemas = [
+                self._schemas_by_name[name]
+                for name in matched_names
+                if name in self._schemas_by_name
+            ]
+            return matched_schemas[:top_k]
+
+        _is_hermes_cancelar = (
+            any(k in q_lower for k in (
+                "cancelar missao", "cancele a missao", "cancelar agente", "cancele o agente",
+                "cancelar job", "cancele o job", "parar agente", "pare o agente",
+                "parar agentes", "pare os agentes", "encerrar agentes", "encerre os agentes",
+                "encerrar todos os agentes", "matar agentes", "kill switch", "kill-switch",
+                "kill all", "abortar missao", "aborte a missao", "abortar agente",
+            ))
+            or (
+                any(k in q_lower for k in ("hermes", "subagente", "agente"))
+                and any(w in q_lower for w in ("cancel", "parar", "pare ", "encerr", "abort", "matar", "kill"))
+            )
+        )
+        _is_hermes_perfis = (
+            not _is_hermes_cancelar
+            and (
+                any(k in q_lower for k in (
+                    "listar perfis hermes", "perfis hermes", "perfis do hermes",
+                    "perfis de agentes", "perfis especialistas", "quais perfis",
+                    "quais agentes", "quais subagentes", "listar agentes", "listar subagentes",
+                    "agentes disponiveis", "subagentes disponiveis",
+                ))
+                or (
+                    any(k in q_lower for k in ("hermes", "subagente"))
+                    and any(w in q_lower for w in ("perfil", "perfis", "quais", "listar", "liste", "disponiveis"))
+                )
+            )
+        )
+        _is_hermes_status = (
+            not _is_hermes_cancelar
+            and not _is_hermes_perfis
+            and (
+                any(k in q_lower for k in (
+                    "status dos agentes", "status de agentes", "status do hermes", "status hermes",
+                    "consultar agentes", "consultar status dos agentes", "como estao os agentes",
+                    "agentes ativos", "missoes ativas", "missoes em andamento",
+                    "orcamento dos agentes", "budget guard", "budget dos agentes",
+                    "aprovacoes pendentes", "aprovacoes tier 3",
+                    "status da missao", "progresso do agente", "progresso da missao",
+                ))
+                or (
+                    any(k in q_lower for k in ("hermes", "subagente"))
+                    and any(w in q_lower for w in ("status", "progresso", "orcamento", "budget", "aprovac", "andamento", "como esta"))
+                )
+            )
+        )
+        _is_hermes_delegar = (
+            not _is_hermes_cancelar
+            and not _is_hermes_perfis
+            and not _is_hermes_status
+            and (
+                any(k in q_lower for k in (
+                    "delegar missao", "delegue a missao", "delegue uma missao",
+                    "delegar tarefa", "delegue a tarefa", "delegar para o hermes", "delegar ao hermes",
+                    "delegar para agente", "delegar ao agente", "mandar o hermes", "mande o hermes",
+                    "pedir ao hermes", "acionar hermes", "acionar subagente",
+                    "subagente pesquisador", "subagente engenheiro", "subagente analista", "subagente sentinela",
+                    "agente pesquisador", "agente engenheiro", "agente analista", "agente sentinela",
+                    "perfil pesquisador", "perfil engenheiro", "perfil analista", "perfil sentinela",
+                    "missao hermes", "missao para o hermes",
+                    "delegar para o pesquisador", "delegar para o engenheiro",
+                    "delegar para o analista", "delegar para o sentinela",
+                ))
+                or "subagente" in q_lower
+                or (
+                    "hermes" in q_lower
+                    and not any(w in q_lower for w in ("o que e ", "quem e ", "quem foi", "mitologia"))
+                )
+            )
+        )
+        _is_hermes = _is_hermes_cancelar or _is_hermes_perfis or _is_hermes_status or _is_hermes_delegar
+        if _is_hermes:
+            if _is_hermes_cancelar:
+                prim_h = "cancelar_missao_agente"
+            elif _is_hermes_perfis:
+                prim_h = "listar_perfis_hermes"
+            elif _is_hermes_status:
+                prim_h = "consultar_status_agentes"
+            else:
+                prim_h = "delegar_missao_hermes"
+            for hermes_skill in (
+                "delegar_missao_hermes",
+                "consultar_status_agentes",
+                "cancelar_missao_agente",
+                "listar_perfis_hermes",
+            ):
+                if hermes_skill not in matched_names:
+                    matched_names.append(hermes_skill)
+            if prim_h in matched_names:
+                matched_names.remove(prim_h)
+            matched_names.insert(0, prim_h)
+            for falso_pos in ("abrir_programa", "pesquisar_informacao_web", "pesquisar_google", "pesquisar_na_web", "fechar_janela"):
+                if falso_pos in matched_names:
+                    matched_names.remove(falso_pos)
             matched_schemas = [
                 self._schemas_by_name[name]
                 for name in matched_names

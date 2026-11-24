@@ -580,8 +580,21 @@ def buscar_conhecimento(
             bm25_idx = _obter_indice_bm25(colecao, total)
             if bm25_idx is not None:
                 bm25_hits = bm25_idx.search(pergunta, top_k=n_fetch, habilidade=habilidade)
+                q_tokens_unique = set(tokenizar_pt_tecnico(pergunta))
+                _self_names = {"fryvis", "fryivs", "frives"}
                 for bm25_rank, (doc_idx, bm25_sc) in enumerate(bm25_hits, start=1):
                     cid_str = bm25_idx.ids[doc_idx]
+                    if cid_str not in rrf_scores:
+                        doc_tf = bm25_idx.doc_freqs[doc_idx]
+                        matched_terms = [t for t in q_tokens_unique if doc_tf.get(t, 0) > 0]
+                        if len(q_tokens_unique) >= 2 and len(matched_terms) < 2:
+                            if not any(
+                                t not in _self_names and any(c.isdigit() or c in "-_./" for c in t)
+                                for t in matched_terms
+                            ):
+                                continue
+                        elif len(matched_terms) == 1 and matched_terms[0] in _self_names:
+                            continue
                     chunk_docs.setdefault(cid_str, bm25_idx.documents[doc_idx])
                     chunk_metas.setdefault(cid_str, bm25_idx.metadatas[doc_idx])
                     bm25_scores[cid_str] = bm25_sc

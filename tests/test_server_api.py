@@ -244,16 +244,15 @@ class TestServerAudioLastEndpoint(unittest.TestCase):
             response = self.client.get("/api/audio/last")
             self.assertEqual(response.status_code, 404)
 
-    @patch("os.path.exists", return_value=True)
-    @patch("os.path.getsize", return_value=2048)
-    def test_get_last_audio_success_returns_no_cache_headers(self, mock_size, mock_exists):
+    def test_get_last_audio_success_returns_no_cache_headers(self):
         temp_audio = os.path.join(ROOT, "resposta.mp3")
         already_existed = os.path.exists(temp_audio)
         if not already_existed:
             with open(temp_audio, "wb") as f:
                 f.write(b"ID3FakeMp3Content")
         try:
-            response = self.client.get("/api/audio/last")
+            with patch("os.path.exists", return_value=True), patch("os.path.getsize", return_value=2048):
+                response = self.client.get("/api/audio/last")
             self.assertEqual(response.status_code, 200)
             self.assertIn("no-cache", response.headers.get("cache-control", ""))
         finally:

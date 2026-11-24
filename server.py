@@ -144,6 +144,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[Startup] Aviso ao iniciar VoiceDaemon: {e}")
 
+    if not os.getenv("PYTEST_CURRENT_TEST"):
+        try:
+            from skills.scheduler_ops import _garantir_scheduler_ativo
+            _garantir_scheduler_ativo()
+            print("[Startup] Scheduler persistente da FRYIVS ativo.")
+        except Exception as e:
+            print(f"[Startup] Aviso ao iniciar Scheduler: {e}")
+
     yield
     from core.command_queue import get_queue
     from core.audio_player import parar as parar_audio
@@ -198,6 +206,12 @@ try:
     app.include_router(brain_router)
 except ImportError:
     pass
+
+from core.n8n_bridge import n8n_router
+from core.agent_orchestrator import agents_router
+
+app.include_router(n8n_router)
+app.include_router(agents_router)
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "ui", "static")
 if os.path.exists(STATIC_DIR):

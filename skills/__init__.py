@@ -68,6 +68,19 @@ from .code_graph_ops import (
     atualizar_mapa_codigo,
     CODE_GRAPH_SCHEMAS,
 )
+from .n8n_ops import (
+    disparar_workflow_n8n,
+    listar_workflows_n8n,
+    consultar_execucoes_n8n,
+    N8N_SCHEMAS,
+)
+from .hermes_ops import (
+    delegar_missao_hermes,
+    consultar_status_agentes,
+    cancelar_missao_agente,
+    listar_perfis_hermes,
+    HERMES_SCHEMAS,
+)
 
 SKILLS_REGISTRY: Final[dict[str, Callable[..., str]]] = {
     "abrir_programa": abrir_programa,
@@ -113,6 +126,13 @@ SKILLS_REGISTRY: Final[dict[str, Callable[..., str]]] = {
     "caminho_entre_componentes": caminho_entre_componentes,
     "resumo_arquitetura_sistema": resumo_arquitetura_sistema,
     "atualizar_mapa_codigo": atualizar_mapa_codigo,
+    "disparar_workflow_n8n": disparar_workflow_n8n,
+    "listar_workflows_n8n": listar_workflows_n8n,
+    "consultar_execucoes_n8n": consultar_execucoes_n8n,
+    "delegar_missao_hermes": delegar_missao_hermes,
+    "consultar_status_agentes": consultar_status_agentes,
+    "cancelar_missao_agente": cancelar_missao_agente,
+    "listar_perfis_hermes": listar_perfis_hermes,
 }
 
 ALL_SKILL_SCHEMAS: Final[list[dict[str, Any]]] = [
@@ -124,6 +144,8 @@ ALL_SKILL_SCHEMAS: Final[list[dict[str, Any]]] = [
     *WORD_DOC_SCHEMAS,
     *SCHEDULER_SCHEMAS,
     *CODE_GRAPH_SCHEMAS,
+    *N8N_SCHEMAS,
+    *HERMES_SCHEMAS,
 ]
 
 

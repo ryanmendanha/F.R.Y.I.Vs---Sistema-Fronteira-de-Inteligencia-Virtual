@@ -3,6 +3,7 @@ import ParticleDrift from "@/components/ui/particle-drift";
 import { AIOrb } from "@/components/AIOrb";
 import type { AIOrbState, AIOrbModel } from "@/components/AIOrb/types";
 import { E2EELockGate } from "@/components/E2EELockGate";
+import { AgentsControlPanel } from "@/components/AgentsControlPanel";
 import {
   appendE2EETokenToUrl,
   buildE2EEHeaders,
@@ -76,6 +77,7 @@ export default function App() {
   };
 
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
+  const [agentsPanelOpen, setAgentsPanelOpen] = useState(false);
 
   // Estado E2EE (End-to-End Encryption Gate)
   const [e2eeChecking, setE2eeChecking] = useState<boolean>(true);
@@ -222,6 +224,7 @@ export default function App() {
     setE2eeSessionToken(null);
     setE2eeUnlocked(false);
     setIsAdmin(false);
+    setAgentsPanelOpen(false);
     setAiState("idle");
     setAudioLevel(0);
     try {
@@ -877,6 +880,21 @@ export default function App() {
             )}
 
             <button
+              type="button"
+              onClick={() => setAgentsPanelOpen(true)}
+              aria-label="Abrir Central Multi-Agente"
+              title="Central Multi-Agente (Hermes WSL2 · Budget Guard · Aprovações Tier 3)"
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[10px] font-mono font-semibold transition-all cursor-pointer backdrop-blur-xl ${
+                agentsPanelOpen
+                  ? "bg-cyan-500/20 border border-cyan-400/50 text-cyan-200 shadow-[0_0_14px_rgba(34,211,238,0.25)]"
+                  : "bg-black/55 border border-white/10 text-slate-300 hover:text-cyan-200 hover:border-cyan-400/40 hover:bg-cyan-500/10"
+              }`}
+            >
+              <Bot size={12} className="text-cyan-400 shrink-0" />
+              <span className="hidden sm:inline">Agentes</span>
+            </button>
+
+            <button
               onClick={() => setIsAdmin((v) => !v)}
               aria-label={isAdmin ? "Ocultar Controles Avançados" : "Mostrar Controles Avançados"}
               className={`p-2 rounded-full transition-all cursor-pointer ${
@@ -1219,6 +1237,12 @@ export default function App() {
           </div>
         )}
       </div>
+
+      <AgentsControlPanel
+        sessionToken={e2eeSessionToken}
+        isOpen={agentsPanelOpen}
+        onClose={() => setAgentsPanelOpen(false)}
+      />
 
       {!e2eeChecking && e2eeRequired && !e2eeUnlocked && (
         <E2EELockGate
