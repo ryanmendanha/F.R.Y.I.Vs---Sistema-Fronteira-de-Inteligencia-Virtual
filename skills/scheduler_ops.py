@@ -12,7 +12,7 @@ import re as _re
 import threading
 import time
 from pathlib import Path as _Path
-from typing import Any, Final, Literal
+from typing import Any, Callable, Final, Literal
 from pydantic import BaseModel, Field
 
 try:
@@ -57,16 +57,113 @@ def _salvar_jobs() -> None:
         print(f"[Scheduler] Aviso: não foi possível salvar jobs em disco: {e}")
 
 
+def _job_tag(job_info: dict[str, Any]) -> str:
+    """Chave determinística para evitar registros duplicados no objeto `schedule`."""
+    h = str(job_info.get("horario", "")).strip()
+    cmd = str(job_info.get("comando", "")).strip()
+    tipo = str(job_info.get("tipo", "diario")).strip()
+    return f"fryivs_job:{tipo}|{h}|{cmd}"
+
+
+def _criar_callback_tarefa(cmd: str) -> Callable[[], None]:
+    """Cria closure isolada por tarefa agendada (evita captura mutável em loops)."""
+    def _tarefa() -> None:
+        print(f"[Scheduler] Disparando tarefa agendada: {cmd}")
+        try:
+            from core import assistant_pipeline as _pl
+            import asyncio as _asyncio
+            from core import voice_daemon as _vd
+            loop = getattr(_vd, "_event_loop", None)
+            if loop is not None and not loop.is_closed():
+                _asyncio.run_coroutine_threadsafe(
+                    _pl.processar_comando(
+                        texto=cmd,
+                        origem="scheduler",
+                        generate_speech=True,
+                        tocar_local=True,
+                    ),
+                    loop,
+                )
+            else:
+                from core.tts import falar as _falar
+                _falar(f"Lembrete: {cmd}")
+        except Exception as _exc_t:
+            print(f"[Scheduler] Erro ao executar '{cmd}': {_exc_t}")
+
+    return _tarefa
+
+
+def _registrar_job_no_schedule(job_info: dict[str, Any]) -> tuple[bool, str]:
+    """
+    Registra concretamente um `job_info` no objeto `schedule`, prevenindo duplicatas via tag.
+
+    Retorna:
+        `(registrado, detalhe)` onde `detalhe` descreve a periodicidade, `'already_registered'`
+        ou motivo do erro.
+    """
+    if schedule is None:
+        return False, "schedule_unavailable"
+
+    h = str(job_info.get("horario", "")).strip()
+    cmd = str(job_info.get("comando", "")).strip()
+    tipo = str(job_info.get("tipo", "diario")).strip()
+    if not h or not cmd:
+        return False, "invalid_job_info"
+
+    tag = _job_tag(job_info)
+    for existing in getattr(schedule, "jobs", []):
+        if tag in getattr(existing, "tags", set()):
+            return False, "already_registered"
+
+    tarefa = _criar_callback_tarefa(cmd)
+
+    if tipo == "intervalo_minutos" or _re.search(r"\d+\s*m", h):
+        m = _re.search(r"\d+", h)
+        if not m:
+            return False, f"Formato de intervalo inválido: '{h}'. Use '15m' ou '30min'."
+        minutos = int(m.group())
+        if minutos <= 0:
+            return False, "Intervalo deve ser maior que zero."
+        schedule.every(minutos).minutes.do(tarefa).tag(tag)
+        return True, f"a cada {minutos} minutos"
+
+    schedule.every().day.at(h).do(tarefa).tag(tag)
+    return True, f"todos os dias às {h}"
+
+
 def _carregar_jobs() -> None:
-    """Carrega _jobs_registry do disco na inicialização do scheduler."""
+    """
+    Carrega `_jobs_registry` do disco na inicialização do scheduler e RE-AGENDA
+    cada rotina no objeto `schedule` (corrigindo o bug do Agendador Zumbi).
+    """
     global _jobs_registry
     if not _JOBS_FILE.exists():
         return
     try:
         dados = _json.loads(_JOBS_FILE.read_text(encoding="utf-8"))
         if isinstance(dados, list):
-            _jobs_registry = dados
-            print(f"[Scheduler] {len(dados)} job(s) restaurado(s) do disco.")
+            deduped: list[dict[str, Any]] = []
+            seen_tags: set[str] = set()
+            reagendados = 0
+            for item in dados:
+                if not isinstance(item, dict):
+                    continue
+                tag = _job_tag(item)
+                if tag in seen_tags:
+                    continue
+                seen_tags.add(tag)
+                deduped.append(item)
+                try:
+                    ok, _det = _registrar_job_no_schedule(item)
+                    if ok:
+                        reagendados += 1
+                except Exception as exc_reg:
+                    print(f"[Scheduler] Aviso: falha ao reagendar job '{item.get('comando')}': {exc_reg}")
+            _jobs_registry = deduped
+            print(
+                f"[Scheduler] {len(deduped)} job(s) restaurado(s) do disco "
+                f"({reagendados} reagendado(s) no schedule)."
+            )
     except Exception as e:
         print(f"[Scheduler] Aviso: erro ao carregar jobs do disco: {e}")
 
@@ -122,29 +219,6 @@ def agendar_execucao(horario: str, comando: str, tipo: str = "diario") -> str:
         h = horario.strip()
         cmd = comando.strip()
 
-        def _tarefa() -> None:
-            print(f"[Scheduler] Disparando tarefa agendada: {cmd}")
-            try:
-                from core import assistant_pipeline as _pl
-                import asyncio as _asyncio
-                from core import voice_daemon as _vd
-                loop = getattr(_vd, '_event_loop', None)
-                if loop is not None and not loop.is_closed():
-                    _asyncio.run_coroutine_threadsafe(
-                        _pl.processar_comando(
-                            texto=cmd,
-                            origem="scheduler",
-                            generate_speech=True,
-                            tocar_local=True,
-                        ),
-                        loop,
-                    )
-                else:
-                    from core.tts import falar as _falar
-                    _falar(f"Lembrete: {cmd}")
-            except Exception as _exc_t:
-                print(f"[Scheduler] Erro ao executar '{cmd}': {_exc_t}")
-
         job_info = {
             "horario": h,
             "comando": cmd,
@@ -152,22 +226,21 @@ def agendar_execucao(horario: str, comando: str, tipo: str = "diario") -> str:
             "criado_em": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
 
-        if tipo == "intervalo_minutos" or _re.search(r'\d+\s*m', h):
-            m = _re.search(r'\d+', h)
-            if not m:
-                return f"Formato de intervalo inválido: '{h}'. Use '15m' ou '30min'."
-            minutos = int(m.group())
-            if minutos <= 0:
-                return "Intervalo deve ser maior que zero."
-            schedule.every(minutos).minutes.do(_tarefa)
-            _jobs_registry.append(job_info)
-            _salvar_jobs()
-            return f"Rotina agendada: executar '{cmd}' a cada {minutos} minutos."
+        registrado, detalhe = _registrar_job_no_schedule(job_info)
+        if not registrado:
+            if detalhe == "already_registered":
+                tag = _job_tag(job_info)
+                if not any(_job_tag(j) == tag for j in _jobs_registry):
+                    _jobs_registry.append(job_info)
+                    _salvar_jobs()
+                return f"Rotina já agendada: '{cmd}' ({h})."
+            return detalhe
 
-        schedule.every().day.at(h).do(_tarefa)
-        _jobs_registry.append(job_info)
+        tag = _job_tag(job_info)
+        if not any(_job_tag(j) == tag for j in _jobs_registry):
+            _jobs_registry.append(job_info)
         _salvar_jobs()
-        return f"Rotina agendada: executar '{cmd}' todos os dias às {h}."
+        return f"Rotina agendada: executar '{cmd}' {detalhe}."
     except Exception as e:
         return f"Falha ao agendar tarefa: {e}"
 
@@ -183,10 +256,12 @@ def listar_agendamentos() -> str:
 def enviar_alerta_webhook(
     mensagem: str,
     webhook_url: str | None = None,
-    servico: str = "webhook"
+    servico: str = "webhook",
+    hmac_secret: str | None = None,
 ) -> str:
     """
-    Envia uma notificação externa via requests para WhatsApp, Telegram ou Discord.
+    Envia uma notificação externa via requests para WhatsApp, Telegram, Discord ou n8n,
+    com proteção contra SSRF (`validar_url_externa`) e assinatura HMAC-SHA256 opcional.
     """
     if requests is None:
         return "Erro: A biblioteca requests não está disponível."
@@ -198,10 +273,19 @@ def enviar_alerta_webhook(
             "Defina 'WEBHOOK_URL' no arquivo .env ou forneça o parâmetro 'webhook_url'."
         )
 
+    from core.n8n_bridge import sign_webhook_payload, validar_url_externa
+
+    ok_url, motivo_ssrf = validar_url_externa(
+        url,
+        resolve_dns=not bool(os.environ.get("PYTEST_CURRENT_TEST")),
+    )
+    if not ok_url:
+        return f"Envio bloqueado por proteção SSRF: {motivo_ssrf}"
+
     try:
         url_lower = url.lower()
         if "discord.com/api/webhooks" in url_lower:
-            payload = {"content": mensagem, "username": "F.R.Y.I.Vs"}
+            payload: dict[str, Any] = {"content": mensagem, "username": "F.R.Y.I.Vs"}
         elif "api.telegram.org" in url_lower:
             payload = {"text": f"[F.R.Y.I.Vs] {mensagem}"}
         elif "hooks.slack.com" in url_lower:
@@ -213,9 +297,29 @@ def enviar_alerta_webhook(
                 "mensagem": mensagem,
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
-        res = requests.post(url, json=payload, timeout=5)
+
+        raw_body = _json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        effective_secret = (
+            hmac_secret
+            if hmac_secret is not None
+            else (os.environ.get("N8N_HMAC_SECRET") or os.environ.get("WEBHOOK_HMAC_SECRET") or "")
+        ).strip()
+
+        if effective_secret:
+            headers = sign_webhook_payload(raw_body, effective_secret)
+        else:
+            headers = {"Content-Type": "application/json"}
+
+        res = requests.post(
+            url,
+            data=raw_body.encode("utf-8"),
+            headers=headers,
+            timeout=5,
+            allow_redirects=False,
+        )
         if res.status_code in (200, 201, 204):
-            return f"Notificação externa enviada com sucesso para {servico} (Status {res.status_code})."
+            selo = " [HMAC-SHA256]" if effective_secret else ""
+            return f"Notificação externa enviada com sucesso para {servico}{selo} (Status {res.status_code})."
         return f"Envio concluído com resposta {res.status_code}: {res.text[:100]}"
     except Exception as e:
         return f"Falha ao enviar notificação externa via webhook: {e}"
