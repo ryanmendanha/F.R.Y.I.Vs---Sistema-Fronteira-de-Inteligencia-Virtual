@@ -394,16 +394,25 @@ def verify_webhook_signature(
     if not hmac.compare_digest(expected.encode("utf-8"), sig_clean.encode("utf-8")):
         return False, "Assinatura HMAC-SHA256 inválida."
 
-    # Anti-replay de nonce dentro da janela (quando fornecido junto com nonce_cache)
-    if nonce_cache is not None and nonce:
-        nonce_clean = nonce.strip()
+    # Anti-replay de assinatura + nonce dentro da janela (impede replay mesmo se X-Fryivs-Nonce for removido/alterado)
+    if nonce_cache is not None:
         expiry_cutoff = current_time - max(max_skew_seconds * 2, 120)
         stale_keys = [k for k, seen_at in nonce_cache.items() if seen_at < expiry_cutoff]
         for k in stale_keys:
             nonce_cache.pop(k, None)
-        if nonce_clean in nonce_cache:
+
+        sig_key = f"sig:{str(timestamp).strip()}:{hex_part}"
+        if sig_key in nonce_cache:
+            return False, "Requisição já processada (tentativa de replay da assinatura bloqueada)."
+
+        nonce_clean = nonce.strip() if isinstance(nonce, str) and nonce.strip() else ""
+        nonce_key = f"nonce:{nonce_clean}" if nonce_clean else ""
+        if nonce_key and nonce_key in nonce_cache:
             return False, "Nonce já utilizado (tentativa de replay bloqueada)."
-        nonce_cache[nonce_clean] = current_time
+
+        nonce_cache[sig_key] = current_time
+        if nonce_key:
+            nonce_cache[nonce_key] = current_time
 
     return True, "OK"
 

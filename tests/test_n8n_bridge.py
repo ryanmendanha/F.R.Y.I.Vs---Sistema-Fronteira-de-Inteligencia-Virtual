@@ -173,9 +173,33 @@ class TestHmacSigningAndVerification:
             now=now + 1,
             nonce_cache=cache,
         )
+        # Replay com X-Fryivs-Nonce removido (stripped) -> também deve ser bloqueado
+        ok3, reason3 = verify_webhook_signature(
+            body,
+            headers[HMAC_HEADER_TIMESTAMP],
+            headers[HMAC_HEADER_SIGNATURE],
+            secret,
+            nonce=None,
+            now=now + 2,
+            nonce_cache=cache,
+        )
+        # Replay com X-Fryivs-Nonce randomizado/mutado -> também deve ser bloqueado
+        ok4, reason4 = verify_webhook_signature(
+            body,
+            headers[HMAC_HEADER_TIMESTAMP],
+            headers[HMAC_HEADER_SIGNATURE],
+            secret,
+            nonce="brand-new-attacker-nonce",
+            now=now + 3,
+            nonce_cache=cache,
+        )
         assert ok1 is True
         assert ok2 is False
         assert "replay" in reason2.lower() or "nonce" in reason2.lower()
+        assert ok3 is False
+        assert "replay" in reason3.lower()
+        assert ok4 is False
+        assert "replay" in reason4.lower()
 
     def test_missing_secret_or_bad_prefix_rejected(self):
         ok_no_secret, _ = verify_webhook_signature("{}", "1750000000", "sha256=" + "a" * 64, "", now=1750000000)
@@ -440,6 +464,17 @@ class TestN8nBridgeAndRouter:
         # Replay do mesmo pacote/nonce -> 401
         replay_cb = client.post("/api/n8n/callback", content=raw_cb, headers=good_headers)
         assert replay_cb.status_code == 401
+
+        # Replay removendo X-Fryivs-Nonce -> 401
+        stripped_headers = {k: v for k, v in good_headers.items() if k != HMAC_HEADER_NONCE}
+        replay_stripped_cb = client.post("/api/n8n/callback", content=raw_cb, headers=stripped_headers)
+        assert replay_stripped_cb.status_code == 401
+
+        # Replay mutando X-Fryivs-Nonce -> 401
+        mutated_headers = dict(good_headers)
+        mutated_headers[HMAC_HEADER_NONCE] = "mutated-nonce-999999"
+        replay_mutated_cb = client.post("/api/n8n/callback", content=raw_cb, headers=mutated_headers)
+        assert replay_mutated_cb.status_code == 401
 
         # Bytes não-UTF-8 sem assinatura válida -> 401 limpo (sem 500)
         bad_bytes_cb = client.post(
