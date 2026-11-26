@@ -45,6 +45,8 @@ data/gptcache_fryivs.db
 data/gptcache_map.txt
 data/overlay_state.json
 data/scheduled_jobs.json
+data/sessions.db*
+data/audit_log.jsonl
 
 repositorios-github/
 VoiceStudio/

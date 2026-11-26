@@ -4,6 +4,9 @@ import { AIOrb } from "@/components/AIOrb";
 import type { AIOrbState, AIOrbModel } from "@/components/AIOrb/types";
 import { E2EELockGate } from "@/components/E2EELockGate";
 import { AgentsControlPanel } from "@/components/AgentsControlPanel";
+import { CommandRail } from "@/components/CommandRail";
+import { KnowledgeBaseDrawer } from "@/components/KnowledgeBaseDrawer";
+import { FormattedText } from "@/components/FormattedText";
 import {
   appendE2EETokenToUrl,
   buildE2EEHeaders,
@@ -17,50 +20,133 @@ import {
   type E2EESession,
 } from "@/lib/e2ee";
 import {
+  BookOpen,
+  Bot,
+  Brain,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Code2,
+  Copy,
+  Cpu,
+  FolderKanban,
+  Lightbulb,
+  MessageSquare,
   Mic,
   MicOff,
-  SendHorizontal,
-  Brain,
-  Cpu,
-  Maximize2,
-  Minimize2,
-  TerminalSquare,
-  Monitor,
-  Camera,
-  VolumeX,
-  Volume2,
-  MonitorUp,
-  Activity,
-  Sliders,
-  Lock,
-  Unlock,
-  ShieldCheck,
-  X,
-  ChevronDown,
-  Check,
-  Sparkles,
-  ChevronRight,
-  MessageSquare,
-  Zap,
-  Bot,
-  User,
   Radio,
+  Search,
+  SendHorizontal,
+  ShieldCheck,
+  Sparkles,
+  TerminalSquare,
+  Trash2,
+  User,
+  Wrench,
+  X,
+  Zap,
 } from "lucide-react";
+
+declare global {
+  interface Window {
+    __fryvisLiveScreen?: {
+      open: () => void;
+      close: () => void;
+      toggle: () => void;
+      isActive: () => boolean;
+    };
+  }
+}
+
+interface ChatMessageItem {
+  role: "user" | "assistant";
+  text: string;
+  tools?: { tool: string; result: string }[];
+  time: string;
+}
+
+const ENGINE_OPTIONS = [
+  {
+    id: "gemini",
+    label: "Gemini",
+    subLabel: "Cloud",
+    icon: Sparkles,
+    color: "text-amber-300",
+    dotClass: "bg-amber-400",
+    desc: "Google Gemini Cloud: raciocínio avançado e skills rápidas",
+  },
+  {
+    id: "ollama",
+    label: "Ollama",
+    subLabel: "Local",
+    icon: Cpu,
+    color: "text-cyan-300",
+    dotClass: "bg-cyan-400",
+    desc: "Ollama Local: processamento privado offline",
+  },
+  {
+    id: "hybrid",
+    label: "Híbrido",
+    subLabel: "Auto",
+    icon: Zap,
+    color: "text-emerald-300",
+    dotClass: "bg-emerald-400",
+    desc: "Prioriza Gemini Cloud com failover automático para Ollama",
+  },
+] as const;
+
+const MODEL_PROFILES_CONFIG = [
+  {
+    id: "fryvis_beta",
+    name: "Beta",
+    fullName: "Fryvis Beta",
+    tokens: "40 tok",
+    description: "Ultra rápido · Respostas telegráficas",
+    dotClass: "bg-cyan-400",
+  },
+  {
+    id: "fryvis_1.0",
+    name: "1.0",
+    fullName: "Fryvis 1.0",
+    tokens: "50 tok",
+    description: "Equilibrado · Síntese clara em 1–2 frases",
+    dotClass: "bg-blue-400",
+  },
+  {
+    id: "fryvis_recursive",
+    name: "Rec 1.1",
+    fullName: "Recursive 1.1",
+    tokens: "80+ tok",
+    description: "Expandido · Raciocínio multi-etapa profundo",
+    dotClass: "bg-emerald-400",
+  },
+] as const;
+
+const stateTitles: Record<AIOrbState, string> = {
+  idle: "SISTEMA PRONTO",
+  listening: "ESCUTANDO...",
+  thinking: "PROCESSANDO...",
+  speaking: "FALANDO...",
+};
+
+const stateDotColors: Record<AIOrbState, string> = {
+  idle: "bg-cyan-400",
+  listening: "bg-emerald-400 animate-pulse",
+  thinking: "bg-amber-400 animate-ping",
+  speaking: "bg-blue-400 animate-bounce",
+};
 
 export default function App() {
   const [aiState, setAiState] = useState<AIOrbState>("idle");
-  const [messages, setMessages] = useState<any[]>([]);
+  const [messages, setMessages] = useState<ChatMessageItem[]>([]);
   const [input, setInput] = useState("");
   const chatTextareaRef = useRef<HTMLTextAreaElement>(null);
-  const [status, setStatus] = useState<any>({});
+  const [status, setStatus] = useState<Record<string, any>>({});
   const [wsConnected, setWsConnected] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
   const [isFullScreenOrb, setIsFullScreenOrb] = useState(false);
-  const [showDemoToolbar, setShowDemoToolbar] = useState(true);
   const [chatOpen, setChatOpen] = useState(true);
-
   const [wakeWordActive, setWakeWordActive] = useState(true);
-
   const [micMuted, setMicMuted] = useState<boolean>(false);
 
   const [orbModel, setOrbModel] = useState<AIOrbModel>(() => {
@@ -73,13 +159,20 @@ export default function App() {
 
   const handleOrbModelChange = (m: AIOrbModel) => {
     setOrbModel(m);
-    try { localStorage.setItem("fryvis_orb_model", m); } catch {}
+    try {
+      localStorage.setItem("fryvis_orb_model", m);
+    } catch {}
   };
 
-  const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [agentsPanelOpen, setAgentsPanelOpen] = useState(false);
+  const [agentsBadgeCount, setAgentsBadgeCount] = useState(0);
+  const [kbDrawerOpen, setKbDrawerOpen] = useState(false);
+  const [kbChunksCount, setKbChunksCount] = useState(0);
+  const [liveScreenActive, setLiveScreenActive] = useState(false);
+  const [expandedToolsMsgIdx, setExpandedToolsMsgIdx] = useState<Record<number, boolean>>({});
+  const [copiedMsgIdx, setCopiedMsgIdx] = useState<number | null>(null);
 
-  // Estado E2EE (End-to-End Encryption Gate)
+  // Estado E2EE
   const [e2eeChecking, setE2eeChecking] = useState<boolean>(true);
   const [e2eeRequired, setE2eeRequired] = useState<boolean>(true);
   const [e2eeUnlocked, setE2eeUnlocked] = useState<boolean>(false);
@@ -91,123 +184,68 @@ export default function App() {
   const e2eeSessionKeyRef = useRef<CryptoKey | null>(null);
 
   const [engineProvider, setEngineProvider] = useState<string>(() => {
-    try { return localStorage.getItem("fryvis_engine_provider") || "gemini"; } catch { return "gemini"; }
+    try {
+      return localStorage.getItem("fryvis_engine_provider") || "gemini";
+    } catch {
+      return "gemini";
+    }
   });
 
   const handleEngineChange = (provider: string) => {
     setEngineProvider(provider);
-    try { localStorage.setItem("fryvis_engine_provider", provider); } catch {}
+    try {
+      localStorage.setItem("fryvis_engine_provider", provider);
+    } catch {}
   };
 
-  const ENGINE_OPTIONS = [
-    {
-      id: "gemini",
-      label: "Gemini",
-      subLabel: "Principal",
-      fullName: "Google Gemini Cloud",
-      badge: "Nuvem · Motor Principal",
-      icon: Sparkles,
-      color: "text-amber-400",
-      activeClass: "bg-amber-500/20 border-amber-500/50 text-amber-200 shadow-[0_0_15px_rgba(245,158,11,0.3)]",
-      badgeClass: "bg-amber-500/25 text-amber-300 border-amber-500/40",
-      desc: "Google AI Studio: Motor principal em nuvem para raciocínio avançado e skills."
-    },
-    {
-      id: "ollama",
-      label: "Ollama",
-      subLabel: "Secundário",
-      fullName: "Ollama Local",
-      badge: "Local · Motor Secundário",
-      icon: Cpu,
-      color: "text-cyan-400",
-      activeClass: "bg-cyan-500/20 border-cyan-500/50 text-cyan-200 shadow-[0_0_15px_rgba(6,182,212,0.3)]",
-      badgeClass: "bg-cyan-500/25 text-cyan-300 border-cyan-500/40",
-      desc: "Ollama Local: Motor secundário de processamento offline rápido e privado."
-    },
-    {
-      id: "hybrid",
-      label: "Híbrido",
-      subLabel: "Auto",
-      fullName: "Modo Híbrido",
-      badge: "Failover Inteligente",
-      icon: Zap,
-      color: "text-purple-400",
-      activeClass: "bg-purple-500/20 border-purple-500/50 text-purple-200 shadow-[0_0_15px_rgba(168,85,247,0.3)]",
-      badgeClass: "bg-purple-500/25 text-purple-300 border-purple-500/40",
-      desc: "Modo Híbrido: Prioriza Gemini Cloud e faz failover automático para Ollama."
-    }
-  ];
-
   const [modelProfile, setModelProfile] = useState<string>(() => {
-    try { return localStorage.getItem("fryvis_model_profile") || "fryvis_1.0"; } catch { return "fryvis_1.0"; }
+    try {
+      return localStorage.getItem("fryvis_model_profile") || "fryvis_1.0";
+    } catch {
+      return "fryvis_1.0";
+    }
   });
 
   const handleProfileChange = (p: string) => {
     setModelProfile(p);
-    try { localStorage.setItem("fryvis_model_profile", p); } catch {}
+    try {
+      localStorage.setItem("fryvis_model_profile", p);
+    } catch {}
   };
 
-  const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
-  const modelDropdownRef = useRef<HTMLDivElement>(null);
+  // Menu unificado Motor + Perfil no Top HUD
+  const [enginePopoverOpen, setEnginePopoverOpen] = useState(false);
+  const enginePopoverRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (modelDropdownRef.current && !modelDropdownRef.current.contains(event.target as Node)) {
-        setModelDropdownOpen(false);
+    if (!enginePopoverOpen) return;
+    const onOutside = (e: MouseEvent) => {
+      if (enginePopoverRef.current && !enginePopoverRef.current.contains(e.target as Node)) {
+        setEnginePopoverOpen(false);
       }
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setModelDropdownOpen(false);
-    }
-    if (modelDropdownOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-      document.addEventListener("keydown", handleKeyDown);
-    }
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-      document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [modelDropdownOpen]);
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setEnginePopoverOpen(false);
+    };
+    document.addEventListener("mousedown", onOutside);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("mousedown", onOutside);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [enginePopoverOpen]);
 
-  const MODEL_PROFILES_CONFIG = [
-    {
-      id: "fryvis_beta",
-      name: "Beta",
-      fullName: "Fryvis Beta",
-      tokens: "40 tok",
-      tokenLimit: 40,
-      description: "Ultra rápido · Respostas concisas e telegráficas",
-      badgeClass: "bg-cyan-500/15 border-cyan-500/40 text-cyan-300",
-      activeBg: "bg-cyan-500/10 border-cyan-500/50 text-cyan-200",
-      dotClass: "bg-cyan-400",
-      hoverClass: "hover:bg-cyan-500/10 hover:border-cyan-500/30",
-    },
-    {
-      id: "fryvis_1.0",
-      name: "1.0",
-      fullName: "Fryvis 1.0",
-      tokens: "50 tok",
-      tokenLimit: 50,
-      description: "Equilibrado · Síntese objetiva em 1 a 2 frases",
-      badgeClass: "bg-blue-500/15 border-blue-500/40 text-blue-300",
-      activeBg: "bg-blue-500/10 border-blue-500/50 text-blue-200",
-      dotClass: "bg-blue-400",
-      hoverClass: "hover:bg-blue-500/10 hover:border-blue-500/30",
-    },
-    {
-      id: "fryvis_recursive",
-      name: "Rec 1.1",
-      fullName: "Recursive 1.1",
-      tokens: "80 tok",
-      tokenLimit: 80,
-      description: "Refinado · Raciocínio recursivo expandido",
-      badgeClass: "bg-purple-500/15 border-purple-500/40 text-purple-300",
-      activeBg: "bg-purple-500/10 border-purple-500/50 text-purple-200",
-      dotClass: "bg-purple-400",
-      hoverClass: "hover:bg-purple-500/10 hover:border-purple-500/30",
-    },
-  ];
+  useEffect(() => {
+    const onLiveScreenChange = (e: Event) => {
+      const detail = (e as CustomEvent<{ active?: boolean }>).detail;
+      setLiveScreenActive(Boolean(detail?.active));
+    };
+    window.addEventListener("fryvis-live-screen-change", onLiveScreenChange);
+    return () => window.removeEventListener("fryvis-live-screen-change", onLiveScreenChange);
+  }, []);
 
+  const currentEngine =
+    ENGINE_OPTIONS.find((e) => e.id === engineProvider) || ENGINE_OPTIONS[0];
   const currentProfile =
     MODEL_PROFILES_CONFIG.find((p) => p.id === modelProfile) || MODEL_PROFILES_CONFIG[1];
 
@@ -223,10 +261,11 @@ export default function App() {
     storeE2EEToken(null);
     setE2eeSessionToken(null);
     setE2eeUnlocked(false);
-    setIsAdmin(false);
     setAgentsPanelOpen(false);
+    setKbDrawerOpen(false);
     setAiState("idle");
     setAudioLevel(0);
+    window.__fryvisLiveScreen?.close();
     try {
       if (audioRef.current) {
         audioRef.current.pause();
@@ -266,7 +305,6 @@ export default function App() {
       })
       .catch(() => {
         if (!active) return;
-        // Fail-closed: mantém bloqueado se não confirmar estado
         setE2eeRequired(true);
         setE2eeUnlocked(false);
       })
@@ -286,7 +324,16 @@ export default function App() {
           setMicMuted(data.mic_muted);
         }
       })
-      .catch((err) => console.error(err));
+      .catch(() => {});
+
+    fetch("/api/knowledge/status")
+      .then((res) => res.json())
+      .then((kb) => {
+        if (active && typeof kb.count === "number") {
+          setKbChunksCount(kb.count);
+        }
+      })
+      .catch(() => {});
 
     return () => {
       active = false;
@@ -298,7 +345,6 @@ export default function App() {
   const wsReconnectDelay = useRef<number>(1000);
 
   useEffect(() => {
-    // Não abre WebSocket enquanto o núcleo E2EE estiver bloqueado
     if (e2eeChecking || (e2eeRequired && (!e2eeUnlocked || !e2eeSessionToken))) {
       if (wsReconnectTimerRef.current) {
         clearTimeout(wsReconnectTimerRef.current);
@@ -360,7 +406,11 @@ export default function App() {
             setAiState("speaking");
             setMessages((prev) => [
               ...prev,
-              { role: "assistant", text: data.response || "Senhor?", time: new Date().toLocaleTimeString() },
+              {
+                role: "assistant",
+                text: data.response || "Senhor?",
+                time: new Date().toLocaleTimeString(),
+              },
             ]);
           } else if (data.type === "transcription" && data.transcription) {
             setMessages((prev) => [
@@ -370,7 +420,12 @@ export default function App() {
           } else if (data.type === "chat_response") {
             setMessages((prev) => [
               ...prev,
-              { role: "assistant", text: data.response, tools: data.tools_executed, time: new Date().toLocaleTimeString() },
+              {
+                role: "assistant",
+                text: data.response,
+                tools: data.tools_executed,
+                time: new Date().toLocaleTimeString(),
+              },
             ]);
           } else if (data.type === "voice_daemon_status") {
             if (typeof data.active === "boolean") setWakeWordActive(data.active);
@@ -406,9 +461,7 @@ export default function App() {
       analyserRef.current = analyser;
       sourceNodeRef.current = source;
       dataArrayRef.current = new Uint8Array(analyser.frequencyBinCount);
-    } catch (e) {
-      console.warn("Web Audio Analyser not initialized:", e);
-    }
+    } catch {}
   };
 
   useEffect(() => {
@@ -456,7 +509,9 @@ export default function App() {
       setAiState("idle");
       return;
     }
-    try { window.speechSynthesis.cancel(); } catch {}
+    try {
+      window.speechSynthesis.cancel();
+    } catch {}
 
     const estimatedMs = Math.min(25000, Math.max(2500, cleaned.length * 85));
     const safetyTimer = setTimeout(() => {
@@ -470,37 +525,19 @@ export default function App() {
       setAudioLevel(0);
     };
 
-    const englishPattern = /(Recursive\s+Yield\s+Female\s+Virtual(?:\s+Intelligence)?\s+system)/i;
-    const match = englishPattern.exec(cleaned);
-    const speakUtterance = (chunk: string, lang: string, isLast: boolean) => {
-      const u = new SpeechSynthesisUtterance(chunk);
-      (window as any).__fryvisActiveUtterance = u;
-      u.lang = lang;
-      u.rate = 1.05;
-      u.pitch = 1.0;
-      if (isLast) {
-        u.onend = finishSpeech;
-        u.onerror = finishSpeech;
-      }
-      try {
-        window.speechSynthesis.speak(u);
-      } catch {
-        finishSpeech();
-      }
-    };
+    const u = new SpeechSynthesisUtterance(cleaned);
+    (window as any).__fryvisActiveUtterance = u;
+    u.lang = "pt-BR";
+    u.rate = 1.05;
+    u.pitch = 1.0;
+    u.onend = finishSpeech;
+    u.onerror = finishSpeech;
 
     setAiState("speaking");
-    if (match) {
-      const prefix = cleaned.substring(0, match.index).trim();
-      const english = match[1].trim();
-      const suffix = cleaned.substring(match.index + match[0].length).trim();
-      const items: { text: string; lang: string }[] = [];
-      if (prefix) items.push({ text: prefix, lang: "pt-BR" });
-      items.push({ text: english, lang: "en-US" });
-      if (suffix) items.push({ text: suffix, lang: "pt-BR" });
-      items.forEach((item, idx) => speakUtterance(item.text, item.lang, idx === items.length - 1));
-    } else {
-      speakUtterance(cleaned, "pt-BR", true);
+    try {
+      window.speechSynthesis.speak(u);
+    } catch {
+      finishSpeech();
     }
   };
 
@@ -538,11 +575,11 @@ export default function App() {
     }
   };
 
-  const handleSend = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  const sendMessageText = async (rawText: string) => {
     if (e2eeRequired && !e2eeUnlocked) return;
-    if (!input.trim()) return;
-    const userMsg = input;
+    const userMsg = rawText.trim();
+    if (!userMsg) return;
+
     const recentHistory = messages.slice(-8).map((m) => ({
       role: m.role === "assistant" ? "assistant" : "user",
       content: m.text,
@@ -551,7 +588,10 @@ export default function App() {
     if (chatTextareaRef.current) {
       chatTextareaRef.current.style.height = "auto";
     }
-    setMessages((prev) => [...prev, { role: "user", text: userMsg, time: new Date().toLocaleTimeString() }]);
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", text: userMsg, time: new Date().toLocaleTimeString() },
+    ]);
     setAiState("thinking");
     try {
       const rawChatPayload = {
@@ -587,7 +627,15 @@ export default function App() {
           : rawData;
 
       if (data && data.response) {
-        setMessages((prev) => [...prev, { role: "assistant", text: data.response, tools: data.tools_executed, time: new Date().toLocaleTimeString() }]);
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            text: data.response,
+            tools: data.tools_executed,
+            time: new Date().toLocaleTimeString(),
+          },
+        ]);
       }
 
       if (data && data.played_locally) {
@@ -625,45 +673,41 @@ export default function App() {
       } else {
         setAiState("idle");
       }
-    } catch (err: any) {
-      console.error("[F.R.Y.I.Vs] Erro na requisição do chat:", err);
+    } catch {
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", text: "Não foi possível obter resposta no momento, senhor. O núcleo está restabelecendo conexões.", time: new Date().toLocaleTimeString() }
+        {
+          role: "assistant",
+          text: "Não foi possível obter resposta no momento, senhor. O núcleo está restabelecendo conexões.",
+          time: new Date().toLocaleTimeString(),
+        },
       ]);
       setAiState("idle");
     }
   };
 
-  const voiceAbortControllerRef = useRef<AbortController | null>(null);
-
-  const pararEscutaComando = () => {
-    if (voiceAbortControllerRef.current) {
-      voiceAbortControllerRef.current.abort();
-      voiceAbortControllerRef.current = null;
-    }
-    setAiState("idle");
-    setAudioLevel(0);
+  const handleSend = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    void sendMessageText(input);
   };
 
   const pararComandoAtivo = async () => {
-    pararEscutaComando();
+    setAiState("idle");
+    setAudioLevel(0);
     try {
       await fetch("/api/commands/cancel", {
         method: "POST",
         headers: buildE2EEHeaders(e2eeSessionToken),
       });
-    } catch {
-    }
+    } catch {}
   };
 
   const handleVoice = async () => {
     if (e2eeRequired && !e2eeUnlocked) return;
-    if (aiState === "thinking" || aiState === "speaking") {
-      return;
-    }
+    if (aiState === "thinking" || aiState === "speaking") return;
     if (aiState === "listening") {
-      pararEscutaComando();
+      setAiState("idle");
+      setAudioLevel(0);
       return;
     }
     if (micMuted) {
@@ -675,13 +719,11 @@ export default function App() {
         method: "POST",
         headers: buildE2EEHeaders(e2eeSessionToken),
       });
-      if (res.status === 423) {
-        forceLocalLock();
-      }
+      if (res.status === 423) forceLocalLock();
     } catch {}
   };
 
-  const executeSkill = async (skill: string, args: any = {}) => {
+  const executeSkill = async (skill: string, args: Record<string, unknown> = {}) => {
     if (e2eeRequired && !e2eeUnlocked) return;
     try {
       const res = await fetch("/api/skills/execute", {
@@ -689,257 +731,229 @@ export default function App() {
         headers: buildE2EEHeaders(e2eeSessionToken, { "Content-Type": "application/json" }),
         body: JSON.stringify({ skill, arguments: args }),
       });
-      if (res.status === 423) {
-        forceLocalLock();
-      }
+      if (res.status === 423) forceLocalLock();
     } catch {}
   };
 
-  const stateTitles: Record<AIOrbState, string> = {
-    idle:      "SISTEMA PRONTO",
-    listening: "ESCUTANDO...",
-    thinking:  "PROCESSANDO...",
-    speaking:  "FALANDO...",
+  const handleCopyMsg = (idx: number, text: string) => {
+    navigator.clipboard?.writeText(text).then(() => {
+      setCopiedMsgIdx(idx);
+      setTimeout(() => setCopiedMsgIdx(null), 1600);
+    });
   };
 
-  const stateDotColors: Record<AIOrbState, string> = {
-    idle:      "bg-blue-400",
-    listening: "bg-emerald-400 animate-pulse",
-    thinking:  "bg-purple-400 animate-ping",
-    speaking:  "bg-pink-400 animate-bounce",
-  };
-
-  const ORB_MODEL_OPTIONS: { id: AIOrbModel; label: string; desc: string }[] = [
-    { id: "orbital-hud",      label: "Orbital HUD",       desc: "Novo · Anéis orbitais + Núcleo neon" },
-    { id: "neural-fibonacci",  label: "Neural Fibonacci",   desc: "Clássico · Anel Fibonacci em partículas" },
-  ];
-
-  const chatSidebarWidth = chatOpen && !isFullScreenOrb ? 420 : 0;
+  const ActiveEngineIcon = currentEngine.icon;
 
   return (
-    <div className="w-screen h-dvh flex overflow-hidden bg-black text-slate-200 font-sans selection:bg-blue-500/30">
+    <div className="w-screen h-dvh flex overflow-hidden bg-[#02050b] text-slate-200 font-sans selection:bg-cyan-500/30">
       <audio ref={audioRef} className="hidden" preload="auto" />
 
-      <div className="fixed inset-0 z-0 pointer-events-none opacity-20 mix-blend-screen">
+      {/* Partículas ambientais sutis */}
+      <div className="fixed inset-0 z-0 pointer-events-none opacity-15 mix-blend-screen">
         <ParticleDrift
           mode="dark"
-          speed={aiState === "thinking" ? 1.2 : 0.4}
-          density={0.5}
-          hue={aiState === "thinking" ? 280 : aiState === "listening" ? 140 : 220}
+          speed={aiState === "thinking" ? 1.1 : 0.35}
+          density={0.45}
+          hue={aiState === "thinking" ? 195 : aiState === "listening" ? 150 : 210}
         />
       </div>
 
-      <div className="flex-1 min-w-0 relative flex flex-col items-center justify-center z-10 bg-black overflow-hidden">
-        <header
-          className="absolute top-0 left-0 z-30 flex items-center gap-2.5 px-4 py-2 pointer-events-none min-w-0"
-          style={{ right: chatSidebarWidth }}
-        >
-          <div className="flex items-center gap-2.5 pointer-events-auto shrink-0 min-w-fit">
-            <img
-              src="/static/fryivs-icon-removebg-preview.png"
-              alt="F.R.Y.I.Vs"
-              className="w-9 h-9 object-contain shrink-0 drop-shadow-[0_0_10px_rgba(34,211,238,0.75)] hover:drop-shadow-[0_0_16px_rgba(34,211,238,0.9)] transition-all duration-300"
-            />
-            <div className="flex flex-col justify-center gap-[2px]">
-              <h1 className="text-[14px] font-bold tracking-[0.3em] text-white leading-none drop-shadow-[0_0_8px_rgba(34,211,238,0.4)] tabular-nums whitespace-nowrap">
-                F.R.Y.I.Vs
-              </h1>
-              <p className="text-[8px] uppercase tracking-[0.28em] text-slate-400 font-mono leading-none whitespace-nowrap">
-                NEURAL INTELLIGENCE <span className="text-cyan-400 font-bold">OS</span>
+      {/* 1. Command Rail Lateral Esquerdo */}
+      {!isFullScreenOrb && (
+        <CommandRail
+          orbModel={orbModel}
+          onOrbModelChange={handleOrbModelChange}
+          isFullScreenOrb={isFullScreenOrb}
+          onToggleFullScreen={() => setIsFullScreenOrb((v) => !v)}
+          agentsOpen={agentsPanelOpen}
+          onOpenAgents={() => setAgentsPanelOpen(true)}
+          agentsBadgeCount={agentsBadgeCount}
+          kbOpen={kbDrawerOpen}
+          onOpenKB={() => setKbDrawerOpen(true)}
+          kbChunksCount={kbChunksCount}
+          chatOpen={chatOpen}
+          onToggleChat={() => setChatOpen((v) => !v)}
+          onToggleLiveScreen={() => window.__fryvisLiveScreen?.toggle()}
+          liveScreenActive={liveScreenActive}
+          onExecuteSkill={executeSkill}
+          aiState={aiState}
+          onSetDemoState={(st, lvl) => {
+            setAiState(st);
+            setAudioLevel(lvl);
+          }}
+          audioLevel={audioLevel}
+          onAudioLevelChange={setAudioLevel}
+          e2eeRequired={e2eeRequired}
+          e2eeUnlocked={e2eeUnlocked}
+          onLockAI={handleLockAI}
+        />
+      )}
+
+      {/* 2. Palco Central 3D + Top HUD Minimalista */}
+      <main className="flex-1 min-w-0 relative flex flex-col items-center justify-center z-10 overflow-hidden">
+        {/* Top HUD enxuto e respirável */}
+        <header className="absolute top-0 inset-x-0 z-30 flex items-center justify-between gap-3 px-5 py-3.5 pointer-events-none">
+          {/* Esquerda: Wordmark + Conexão */}
+          <div className="flex items-center gap-3 pointer-events-auto">
+            <div className="flex flex-col">
+              <div className="flex items-center gap-2">
+                <h1 className="text-[13px] font-bold tracking-[0.28em] text-white leading-none">
+                  F.R.Y.I.Vs
+                </h1>
+                <span
+                  title={wsConnected ? "Conectado em tempo real (WebSocket)" : "Reconectando..."}
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    wsConnected ? "bg-emerald-400" : "bg-red-400"
+                  }`}
+                />
+              </div>
+              <p className="text-[8.5px] uppercase tracking-[0.24em] text-slate-400 font-mono mt-1">
+                SISTEMA FRONTEIRA DE INTELIGÊNCIA <span className="text-cyan-400 font-semibold">VIRTUAL</span>
               </p>
             </div>
           </div>
 
-          <div className="hidden sm:flex items-center gap-1 p-1 rounded-full bg-black/55 border border-white/10 backdrop-blur-2xl shadow-[0_4px_20px_rgba(0,0,0,0.7)] pointer-events-auto shrink-0">
-            {ENGINE_OPTIONS.map((eng) => {
-              const isSelected = engineProvider === eng.id;
-              const Icon = eng.icon;
-              return (
-                <button
-                  key={eng.id}
-                  type="button"
-                  onClick={() => handleEngineChange(eng.id)}
-                  title={eng.desc}
-                  aria-label={`Motor: ${eng.label} — ${eng.subLabel}`}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono transition-all duration-200 border cursor-pointer ${
-                    isSelected
-                      ? `${eng.activeClass} font-semibold`
-                      : "bg-transparent border-transparent text-slate-400 hover:text-slate-200 hover:bg-white/5"
-                  }`}
-                >
-                  <Icon size={11} className={isSelected ? eng.color : "text-slate-500"} />
-                  <span className={isSelected ? "text-slate-100 font-bold" : "text-slate-400"}>{eng.label}</span>
-                  <span className={`text-[7px] px-1 py-0.5 rounded font-sans uppercase tracking-wider font-bold border ${
-                    isSelected ? eng.badgeClass : "bg-white/5 text-slate-600 border-white/5"
-                  }`}>{eng.subLabel}</span>
-                </button>
-              );
-            })}
+          {/* Centro: Pílula de Estado Cognitivo */}
+          <div className="hidden md:flex items-center gap-2 px-4 py-1.5 rounded-full border border-white/10 bg-[#050b16]/80 backdrop-blur-xl">
+            <span className={`w-2 h-2 rounded-full ${stateDotColors[aiState]}`} />
+            <span className="text-[10px] uppercase tracking-[0.22em] font-mono font-semibold text-slate-200">
+              {stateTitles[aiState]}
+            </span>
           </div>
 
-          <div className="flex items-center gap-1.5 pointer-events-auto shrink-0 ml-auto">
-            <div ref={modelDropdownRef} className="relative z-30">
+          {/* Direita: Seletor Unificado (Motor + Perfil) + Agentes + E2EE */}
+          <div className="flex items-center gap-2 pointer-events-auto">
+            <div ref={enginePopoverRef} className="relative">
               <button
                 type="button"
-                onClick={() => setModelDropdownOpen((prev) => !prev)}
-                aria-expanded={modelDropdownOpen}
-                aria-label="Seletor de perfil de modelo"
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-black/55 border border-white/10 backdrop-blur-xl hover:border-white/22 transition-all text-[10px] font-mono text-slate-300 hover:text-white"
+                onClick={() => setEnginePopoverOpen((v) => !v)}
+                aria-expanded={enginePopoverOpen}
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#060d1c]/85 border border-white/12 hover:border-cyan-400/40 text-[11px] font-mono text-slate-200 transition-all cursor-pointer backdrop-blur-xl"
               >
-                <span className={`w-1.5 h-1.5 rounded-full ${wsConnected ? "bg-emerald-400" : "bg-red-400"} shrink-0`} />
-                <Cpu size={10} className="text-cyan-400 shrink-0" />
-                <span className={`w-1.5 h-1.5 rounded-full ${currentProfile.dotClass}`} />
-                <span className="hidden sm:inline">{currentProfile.name}</span>
-                <ChevronDown size={10} className={`text-slate-500 transition-transform duration-200 ${modelDropdownOpen ? "rotate-180" : ""}`} />
+                <ActiveEngineIcon size={12} className={currentEngine.color} />
+                <span className="font-semibold">{currentEngine.label}</span>
+                <span className="text-slate-600">·</span>
+                <span className="text-slate-300">{currentProfile.name}</span>
+                <ChevronDown
+                  size={12}
+                  className={`text-slate-400 transition-transform ${
+                    enginePopoverOpen ? "rotate-180" : ""
+                  }`}
+                />
               </button>
 
-              {modelDropdownOpen && (
-                <div
-                  role="listbox"
-                  className="absolute right-0 top-full mt-2 w-64 p-1.5 bg-[#060a10]/97 backdrop-blur-2xl border border-white/12 rounded-2xl shadow-2xl shadow-black/90 ring-1 ring-white/8 space-y-0.5 z-50"
-                >
-                  <div className="px-2.5 py-1.5 flex items-center justify-between border-b border-white/5 mb-1">
-                    <span className="text-[9px] font-mono uppercase tracking-widest text-slate-400 flex items-center gap-1 font-semibold">
-                      <Sparkles size={10} className="text-cyan-400" /> Seletor de Modelo
-                    </span>
-                    <span className="text-[9px] font-mono text-slate-500">Tokens</span>
+              {enginePopoverOpen && (
+                <div className="absolute right-0 top-full mt-2 w-72 rounded-2xl bg-[#050b18]/98 border border-white/12 shadow-2xl backdrop-blur-3xl p-3 space-y-3 z-50">
+                  <div>
+                    <p className="text-[9.5px] font-mono uppercase tracking-widest text-slate-400 font-semibold px-1 mb-1.5">
+                      Motor de Inteligência
+                    </p>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {ENGINE_OPTIONS.map((eng) => {
+                        const Icon = eng.icon;
+                        const active = engineProvider === eng.id;
+                        return (
+                          <button
+                            key={eng.id}
+                            type="button"
+                            onClick={() => handleEngineChange(eng.id)}
+                            title={eng.desc}
+                            className={`flex flex-col items-center gap-1 py-2 px-2 rounded-xl border text-[10.5px] font-mono transition-all cursor-pointer ${
+                              active
+                                ? "bg-cyan-500/16 border-cyan-400/50 text-white font-semibold"
+                                : "bg-white/[0.03] border-white/8 text-slate-400 hover:text-slate-200"
+                            }`}
+                          >
+                            <Icon size={13} className={active ? eng.color : "text-slate-500"} />
+                            <span>{eng.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                  {MODEL_PROFILES_CONFIG.map((profile) => {
-                    const isSelected = modelProfile === profile.id;
-                    return (
-                      <button
-                        key={profile.id}
-                        type="button"
-                        role="option"
-                        aria-selected={isSelected}
-                        onClick={() => { handleProfileChange(profile.id); setModelDropdownOpen(false); }}
-                        className={`w-full text-left p-2 rounded-xl transition-all flex items-center justify-between border ${
-                          isSelected
-                            ? `${profile.activeBg} font-semibold shadow-sm`
-                            : `bg-white/[0.02] border-transparent text-slate-400 ${profile.hoverClass} hover:text-slate-200`
-                        }`}
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0 pr-2">
-                          <div className={`size-2 rounded-full shrink-0 ${isSelected ? profile.dotClass : "bg-slate-600"}`} />
-                          <div className="min-w-0">
-                            <span className="text-xs font-mono font-medium text-slate-100 block truncate">{profile.fullName}</span>
-                            <p className="text-[10px] text-slate-400 truncate mt-0.5">{profile.description}</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border tabular-nums ${profile.badgeClass}`}>{profile.tokens}</span>
-                          {isSelected && <Check size={13} className="text-emerald-400" />}
-                        </div>
-                      </button>
-                    );
-                  })}
+
+                  <div className="pt-2.5 border-t border-white/10">
+                    <p className="text-[9.5px] font-mono uppercase tracking-widest text-slate-400 font-semibold px-1 mb-1.5">
+                      Perfil de Raciocínio
+                    </p>
+                    <div className="space-y-1">
+                      {MODEL_PROFILES_CONFIG.map((prof) => {
+                        const active = modelProfile === prof.id;
+                        return (
+                          <button
+                            key={prof.id}
+                            type="button"
+                            onClick={() => {
+                              handleProfileChange(prof.id);
+                              setEnginePopoverOpen(false);
+                            }}
+                            className={`w-full text-left px-2.5 py-2 rounded-xl border flex items-center justify-between transition-all cursor-pointer ${
+                              active
+                                ? "bg-cyan-500/12 border-cyan-400/45 text-white"
+                                : "bg-transparent border-transparent hover:bg-white/[0.04] text-slate-300"
+                            }`}
+                          >
+                            <div className="min-w-0 pr-2">
+                              <div className="flex items-center gap-2">
+                                <span className={`w-1.5 h-1.5 rounded-full ${prof.dotClass}`} />
+                                <span className="text-xs font-mono font-semibold">{prof.fullName}</span>
+                              </div>
+                              <p className="text-[10px] text-slate-400 truncate mt-0.5">
+                                {prof.description}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className="text-[9.5px] font-mono px-1.5 py-0.5 rounded bg-white/6 text-cyan-200">
+                                {prof.tokens}
+                              </span>
+                              {active && <Check size={12} className="text-emerald-400" />}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
 
-            <div className="flex items-center gap-0.5 p-0.5 rounded-full bg-black/55 border border-white/10 backdrop-blur-xl">
-              {ORB_MODEL_OPTIONS.map((opt) => (
-                <button
-                  key={opt.id}
-                  onClick={() => handleOrbModelChange(opt.id)}
-                  title={`${opt.label}: ${opt.desc}`}
-                  aria-label={`Modo de orbe: ${opt.label}`}
-                  className={`px-2.5 py-1 rounded-full text-[10px] font-mono transition-all ${
-                    orbModel === opt.id
-                      ? "bg-white/15 text-white border border-white/20 shadow-sm"
-                      : "text-slate-500 hover:text-slate-300"
-                  }`}
-                >
-                  {opt.id === "orbital-hud" ? "HUD" : "FIB"}
-                </button>
-              ))}
-            </div>
-
-            <div className="w-px h-5 bg-white/10 mx-0.5" />
+            <button
+              type="button"
+              onClick={() => setAgentsPanelOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-500/14 hover:bg-cyan-500/24 border border-cyan-400/35 text-cyan-200 text-[11px] font-mono font-semibold transition-all cursor-pointer backdrop-blur-xl"
+            >
+              <Bot size={13} className="text-cyan-300" />
+              <span className="hidden sm:inline">Agentes</span>
+              {agentsBadgeCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full bg-cyan-400 text-slate-950 text-[9px] font-bold">
+                  {agentsBadgeCount}
+                </span>
+              )}
+            </button>
 
             {e2eeUnlocked && (
               <div
-                title="Sessão protegida com E2EE (ECDH P-256 + HKDF-SHA256 + AES-256-GCM)"
-                className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/12 border border-emerald-400/30 text-emerald-300 text-[9px] font-mono tracking-wider shrink-0"
+                title="Sessão Criptografada Ponta a Ponta (ECDH P-256 + AES-256-GCM)"
+                className="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-emerald-500/12 border border-emerald-400/30 text-emerald-300 text-[10px] font-mono"
               >
-                <ShieldCheck size={11} className="text-emerald-400 shrink-0" />
+                <ShieldCheck size={12} className="text-emerald-400" />
                 <span>E2EE</span>
               </div>
             )}
 
-            {e2eeRequired && e2eeUnlocked && (
+            {isFullScreenOrb && (
               <button
-                onClick={handleLockAI}
-                aria-label="Bloquear IA"
-                title="Bloquear IA imediatamente (corta voz, escuta e acesso E2EE)"
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-red-500/15 hover:bg-red-500/25 border border-red-400/35 text-red-300 text-[10px] font-mono font-semibold transition-all cursor-pointer"
+                type="button"
+                onClick={() => setIsFullScreenOrb(false)}
+                className="px-3 py-1.5 rounded-xl bg-white/8 hover:bg-white/15 border border-white/15 text-[11px] font-mono text-slate-200 cursor-pointer"
               >
-                <Lock size={11} className="text-red-400 shrink-0" />
-                <span className="hidden sm:inline">Bloquear IA</span>
+                Sair Tela Cheia
               </button>
             )}
-
-            <button
-              type="button"
-              onClick={() => setAgentsPanelOpen(true)}
-              aria-label="Abrir Central Multi-Agente"
-              title="Central Multi-Agente (Hermes WSL2 · Budget Guard · Aprovações Tier 3)"
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[10px] font-mono font-semibold transition-all cursor-pointer backdrop-blur-xl ${
-                agentsPanelOpen
-                  ? "bg-cyan-500/20 border border-cyan-400/50 text-cyan-200 shadow-[0_0_14px_rgba(34,211,238,0.25)]"
-                  : "bg-black/55 border border-white/10 text-slate-300 hover:text-cyan-200 hover:border-cyan-400/40 hover:bg-cyan-500/10"
-              }`}
-            >
-              <Bot size={12} className="text-cyan-400 shrink-0" />
-              <span className="hidden sm:inline">Agentes</span>
-            </button>
-
-            <button
-              onClick={() => setIsAdmin((v) => !v)}
-              aria-label={isAdmin ? "Ocultar Controles Avançados" : "Mostrar Controles Avançados"}
-              className={`p-2 rounded-full transition-all cursor-pointer ${
-                isAdmin
-                  ? "bg-amber-500/15 text-amber-300 border border-amber-500/30 shadow-[0_0_14px_rgba(245,158,11,0.2)] hover:bg-amber-500/25"
-                  : "bg-black/55 border border-white/10 text-slate-500 hover:text-white hover:border-white/22 backdrop-blur-xl"
-              }`}
-              title={isAdmin ? "Controles Avançados Ativos (Sessão E2EE Verificada)" : "Ativar Controles Avançados (Sessão E2EE Verificada)"}
-            >
-              {isAdmin ? <Unlock size={13} className="text-amber-400" /> : <Sliders size={13} />}
-            </button>
-
-            <button
-              onClick={() => setChatOpen((v) => !v)}
-              aria-label={chatOpen ? "Ocultar Terminal de Diálogo" : "Mostrar Terminal de Diálogo"}
-              className={`p-2 rounded-full backdrop-blur-xl transition-all ${
-                chatOpen
-                  ? "bg-cyan-500/15 border border-cyan-400/40 text-cyan-300 hover:bg-cyan-500/25"
-                  : "bg-black/55 border border-white/10 text-slate-500 hover:text-white hover:border-white/22"
-              }`}
-              title={chatOpen ? "Ocultar Chat" : "Mostrar Chat"}
-            >
-              <MessageSquare size={13} />
-            </button>
-
-            <button
-              onClick={() => setIsFullScreenOrb((v) => !v)}
-              aria-label="Alternar tela cheia"
-              className="p-2 rounded-full bg-black/55 border border-white/10 text-slate-500 hover:text-white hover:border-white/22 backdrop-blur-xl transition-all"
-              title="Alternar Tela Cheia"
-            >
-              {isFullScreenOrb ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-            </button>
           </div>
         </header>
 
-        <div className="absolute top-[72px] z-20 flex flex-col items-center pointer-events-none">
-          <div className="px-5 py-1.5 rounded-full border border-white/8 bg-black/40 backdrop-blur-xl flex items-center gap-2.5 shadow-xl shadow-purple-500/5">
-            <div className={`w-2 h-2 rounded-full ${stateDotColors[aiState]}`} />
-            <span className="text-[10px] uppercase tracking-[0.25em] font-mono font-bold text-slate-300">
-              {stateTitles[aiState]}
-            </span>
-          </div>
-        </div>
-
+        {/* Orbe 3D Central */}
         <div className="w-full h-full flex items-center justify-center relative">
           <AIOrb
             model={orbModel}
@@ -949,299 +963,397 @@ export default function App() {
           />
         </div>
 
-        <div className="absolute bottom-8 z-20 flex flex-col items-center gap-4">
-          <div className="flex items-center gap-4">
+        {/* Dock Flutuante de Voz */}
+        <div className="absolute bottom-7 z-20 flex flex-col items-center gap-2.5">
+          <div className="flex items-center gap-3 px-4 py-2 rounded-full bg-[#050b16]/80 border border-white/10 backdrop-blur-2xl shadow-[0_12px_40px_rgba(0,0,0,0.65)]">
             <button
+              type="button"
               onClick={toggleMicMute}
-              title={micMuted ? "Microfone mudo — clique para reativar (desbloqueia entrada e saída de voz)" : "Mutar microfone e saída de voz"}
+              title={micMuted ? "Reativar microfone e voz" : "Mutar microfone e saída de voz"}
               aria-label={micMuted ? "Reativar microfone" : "Mutar microfone"}
-              className={`group relative w-10 h-10 rounded-full flex items-center justify-center transition-all duration-300 ${
+              className={`w-10 h-10 rounded-full flex items-center justify-center transition-all cursor-pointer border ${
                 micMuted
-                  ? "bg-red-700/90 border border-red-400/60 shadow-[0_0_22px_rgba(239,68,68,0.6)] scale-105"
-                  : "bg-black/60 border border-white/12 hover:bg-red-900/30 hover:border-red-500/40 backdrop-blur-xl"
+                  ? "bg-red-600/85 border-red-400/60 text-white shadow-[0_0_18px_rgba(239,68,68,0.45)]"
+                  : "bg-white/[0.04] border-white/10 text-slate-400 hover:text-red-300 hover:border-red-400/35"
               }`}
             >
-              {micMuted
-                ? <MicOff className="w-5 h-5 text-white" />
-                : <MicOff className="w-5 h-5 text-slate-500 group-hover:text-red-400 transition-colors" />
+              <MicOff className="w-4 h-4" />
+            </button>
+
+            <button
+              type="button"
+              onClick={handleVoice}
+              disabled={aiState === "thinking" || aiState === "speaking"}
+              aria-label="Ativar comando por voz"
+              title={
+                aiState === "listening"
+                  ? "Ouvindo... clique para encerrar"
+                  : "Falar com a F.R.Y.I.Vs"
               }
-              {micMuted && (
-                <div className="absolute inset-0 rounded-full border-2 border-red-500 animate-ping opacity-40" />
+              className={`relative w-13 h-13 rounded-full flex items-center justify-center transition-all cursor-pointer border ${
+                aiState === "thinking" || aiState === "speaking"
+                  ? "bg-white/5 border-white/8 opacity-45 cursor-not-allowed"
+                  : aiState === "listening"
+                    ? "bg-emerald-500 border-emerald-300 text-slate-950 scale-105 shadow-[0_0_28px_rgba(16,185,129,0.65)]"
+                    : "bg-cyan-500/18 hover:bg-cyan-500/28 border-cyan-400/45 text-cyan-200 shadow-[0_0_20px_rgba(34,211,238,0.2)]"
+              }`}
+            >
+              <Mic className="w-5 h-5" />
+              {aiState === "listening" && (
+                <span className="absolute inset-0 rounded-full border-2 border-emerald-300 animate-ping" />
               )}
             </button>
 
             {(aiState === "thinking" || aiState === "speaking") && (
               <button
+                type="button"
                 onClick={pararComandoAtivo}
-                title="Parar comando atual"
-                className="group relative w-10 h-10 rounded-full flex items-center justify-center bg-red-600/80 hover:bg-red-500 border border-red-400/40 shadow-[0_0_20px_rgba(239,68,68,0.5)] transition-all duration-200"
+                title="Interromper resposta/execução atual"
+                aria-label="Parar comando atual"
+                className="w-10 h-10 rounded-full flex items-center justify-center bg-red-500/25 hover:bg-red-500/40 border border-red-400/45 text-red-200 transition-all cursor-pointer"
               >
-                <X className="w-4 h-4 text-white" />
+                <X className="w-4 h-4" />
               </button>
             )}
-            <button
-              onClick={handleVoice}
-              disabled={aiState === "thinking" || aiState === "speaking"}
-              title={
-                aiState === "thinking"
-                  ? "Processando comando... escuta desabilitada"
-                  : aiState === "speaking"
-                  ? "Falando... escuta desabilitada"
-                  : aiState === "listening"
-                  ? "Ouvindo... clique para cancelar"
-                  : "Ativar escuta por voz"
+          </div>
+
+          <div className="inline-flex items-center gap-1.5 text-[10px] font-mono text-slate-400">
+            <Radio
+              size={10}
+              className={
+                micMuted
+                  ? "text-red-400"
+                  : wakeWordActive
+                    ? "text-emerald-400 animate-pulse"
+                    : "text-slate-500"
               }
-              className={`group relative w-14 h-14 rounded-full flex items-center justify-center transition-all duration-300 ${
-                aiState === "thinking" || aiState === "speaking"
-                  ? "bg-black/30 border border-white/5 opacity-40 cursor-not-allowed"
-                  : aiState === "listening"
-                  ? "bg-emerald-500 scale-110 shadow-[0_0_35px_rgba(16,185,129,0.7)] cursor-pointer"
-                  : "bg-black/60 border border-white/12 hover:bg-white/8 hover:border-purple-500/40 backdrop-blur-xl cursor-pointer"
-              }`}
-            >
-              <Mic className={`w-6 h-6 ${aiState === "listening" ? "text-white" : "text-slate-300 group-hover:text-blue-400"}`} />
-              {aiState === "listening" && (
-                <div className="absolute inset-0 rounded-full border-2 border-emerald-400 animate-ping" />
-              )}
-            </button>
+            />
+            <span>
+              {micMuted
+                ? "Voz silenciada"
+                : wakeWordActive
+                  ? 'Escuta ativa · diga "FRYIVS"'
+                  : "Escuta em espera"}
+            </span>
           </div>
-
-          {isAdmin && (
-            <div className="flex gap-1.5 px-3 py-2 bg-black/60 backdrop-blur-2xl border border-white/8 rounded-2xl shadow-xl">
-              {[
-                { onClick: () => executeSkill("listar_janelas"), icon: <Monitor size={16} />, title: "Listar Janelas" },
-                { onClick: () => executeSkill("tirar_screenshot"), icon: <Camera size={16} />, title: "Capturar Tela" },
-                { onClick: () => executeSkill("controlar_volume", { acao: "mutar" }), icon: <VolumeX size={16} />, title: "Mutar" },
-                { onClick: () => executeSkill("controlar_volume", { acao: "aumentar" }), icon: <Volume2 size={16} />, title: "Volume +" },
-                { onClick: () => executeSkill("pressionar_atalho", { teclas: ["win", "d"] }), icon: <MonitorUp size={16} />, title: "Desktop" },
-              ].map((btn, i) => (
-                <button
-                  key={i}
-                  onClick={btn.onClick}
-                  title={btn.title}
-                  className="p-2 hover:bg-white/10 rounded-xl text-slate-500 hover:text-white transition-colors"
-                >
-                  {btn.icon}
-                </button>
-              ))}
-            </div>
-          )}
         </div>
+      </main>
 
-        {isAdmin && (
-          <div className="absolute top-[72px] right-6 z-30 flex flex-col items-end gap-2">
-            <button
-              onClick={() => setShowDemoToolbar((prev) => !prev)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/60 border border-white/8 hover:bg-white/8 text-[10px] font-mono text-slate-400 hover:text-white backdrop-blur-xl transition-colors"
-            >
-              <Sliders size={12} />
-              {showDemoToolbar ? "Ocultar Demo" : "Testar Estados"}
-            </button>
-            {showDemoToolbar && (
-              <div className="flex flex-col gap-2 p-3 rounded-2xl bg-black/80 border border-white/8 backdrop-blur-2xl shadow-2xl font-mono text-xs w-56">
-                <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold px-1">
-                  Estados do Orbe
-                </span>
-                <div className="grid grid-cols-2 gap-1.5">
-                  {(["idle", "listening", "thinking", "speaking"] as AIOrbState[]).map((st) => (
-                    <button
-                      key={st}
-                      onClick={() => {
-                        setAiState(st);
-                        setAudioLevel(st === "listening" || st === "speaking" ? 0.4 : 0);
-                      }}
-                      className={`px-2 py-1.5 rounded-lg border transition-all text-center capitalize ${
-                        aiState === st
-                          ? "bg-gradient-to-r from-blue-600 to-purple-600 border-white/20 text-white font-bold shadow-md"
-                          : "bg-white/4 border-white/8 text-slate-400 hover:bg-white/8 hover:text-white"
-                      }`}
-                    >
-                      {st}
-                    </button>
-                  ))}
-                </div>
-                <div className="mt-1 pt-2 border-t border-white/8">
-                  <div className="flex justify-between items-center text-[10px] text-slate-400 mb-1 px-1">
-                    <span className="flex items-center gap-1"><Activity size={10} /> Áudio:</span>
-                    <span className="text-white">{Math.round(audioLevel * 100)}%</span>
-                  </div>
-                  <input
-                    type="range" min="0" max="1" step="0.05" value={audioLevel}
-                    onChange={(e) => setAudioLevel(parseFloat(e.target.value))}
-                    className="w-full accent-purple-500 cursor-pointer h-1.5 bg-white/8 rounded-lg"
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      <div
-        className={`h-full z-20 flex flex-col border-l border-white/10 bg-[#040812]/85 backdrop-blur-3xl transition-all duration-500 ease-in-out overflow-hidden ${
-          chatOpen && !isFullScreenOrb ? "w-[420px] opacity-100" : "w-0 opacity-0"
+      {/* 3. Terminal de Diálogo Rico (Direita) */}
+      <section
+        aria-label="Terminal de Diálogo"
+        className={`h-full z-20 flex flex-col border-l border-white/10 bg-[#040914]/92 backdrop-blur-3xl transition-all duration-300 ease-out overflow-hidden ${
+          chatOpen && !isFullScreenOrb ? "w-[440px] opacity-100" : "w-0 opacity-0"
         }`}
       >
         {chatOpen && !isFullScreenOrb && (
-          <div className="flex flex-col h-full p-5 min-w-[420px]">
-            <div className="flex items-center justify-between mb-4 pb-2 border-b border-white/5">
-              <div className="flex items-center gap-2">
+          <div className="flex flex-col h-full min-w-[440px]">
+            {/* Header enxuto do Chat */}
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/8 bg-[#050c1a]/80">
+              <div className="flex items-center gap-2.5">
                 <MessageSquare size={15} className="text-cyan-400" />
-                <span className="text-[11px] font-mono uppercase tracking-widest text-slate-300 font-bold">
-                  Terminal de Diálogo
-                </span>
+                <div>
+                  <h2 className="text-xs font-mono uppercase tracking-[0.18em] text-white font-bold">
+                    Terminal Neural
+                  </h2>
+                  <p className="text-[10px] font-mono text-slate-400 flex items-center gap-2 mt-0.5">
+                    <span>
+                      {status.gemini_configured ? "Gemini Cloud" : status.model || "Ollama"}
+                    </span>
+                    <span>·</span>
+                    <button
+                      type="button"
+                      onClick={() => setKbDrawerOpen(true)}
+                      className="inline-flex items-center gap-1 text-emerald-300 hover:underline cursor-pointer"
+                    >
+                      <BookOpen size={10} />
+                      {kbChunksCount} chunks KB
+                    </button>
+                  </p>
+                </div>
               </div>
-              <button
-                onClick={() => setChatOpen(false)}
-                className="p-1.5 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-white/5 transition-colors"
-                title="Fechar painel"
-              >
-                <ChevronRight size={14} />
-              </button>
+
+              <div className="flex items-center gap-1">
+                {messages.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setMessages([])}
+                    title="Limpar conversa atual"
+                    aria-label="Limpar conversa"
+                    className="p-1.5 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-white/6 transition-colors cursor-pointer"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setChatOpen(false)}
+                  title="Recolher painel de diálogo"
+                  aria-label="Recolher painel de diálogo"
+                  className="p-1.5 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-white/6 transition-colors cursor-pointer"
+                >
+                  <ChevronRight size={15} />
+                </button>
+              </div>
             </div>
 
-            {(() => {
-              const activeEngine = ENGINE_OPTIONS.find(e => e.id === engineProvider) || ENGINE_OPTIONS[0];
-              const EngIcon = activeEngine.icon;
-              return (
-                <div className="mb-3 flex items-center gap-2 px-3 py-2 rounded-xl bg-black/35 border border-white/6 backdrop-blur-md">
-                  <Radio size={10} className={`${wakeWordActive ? "text-emerald-400 animate-pulse" : "text-slate-500"} shrink-0`} />
-                  <span className="text-[9px] font-mono uppercase tracking-wider text-slate-500 font-semibold">Motor</span>
-                  <div className="flex items-center gap-1.5 ml-1">
-                    <EngIcon size={10} className={activeEngine.color} />
-                    <span className={`text-[10px] font-mono font-semibold ${activeEngine.color}`}>{activeEngine.label}</span>
-                    <span className={`text-[7px] px-1.5 py-0.5 rounded font-mono uppercase tracking-wider border ${activeEngine.badgeClass}`}>{activeEngine.subLabel}</span>
-                  </div>
-                </div>
-              );
-            })()}
-
-            <div className="flex gap-1.5 mb-3 text-[10px] font-mono flex-wrap">
-              {micMuted && (
-                <div className="flex items-center gap-1.5 bg-red-500/15 rounded-lg px-2.5 py-1.5 border border-red-400/35 shrink-0">
-                  <MicOff size={10} className="text-red-400" />
-                  <span className="text-red-300 font-mono font-bold tracking-wider text-[9px]">MIC MUDO</span>
-                </div>
-              )}
-              <div className="flex items-center gap-1.5 bg-white/5 rounded-lg px-2.5 py-1.5 border border-white/10 flex-1 truncate">
-                <div className={`w-1.5 h-1.5 rounded-full ${status.ollama_online ? "bg-emerald-400" : "bg-red-400"} animate-pulse shrink-0`} />
-                <span className="text-slate-400 truncate">
-                  Ollama: <span className="text-slate-200 font-semibold">{status.model || "Local"}</span>
-                </span>
-              </div>
-              {status.gemini_configured && (
-                <div className="flex items-center gap-1.5 bg-white/5 rounded-lg px-2.5 py-1.5 border border-white/10 shrink-0">
-                  <div className={`w-1.5 h-1.5 rounded-full ${status.gemini_online ? "bg-cyan-400" : "bg-amber-400"} animate-pulse`} />
-                  <span className="text-slate-400">Gemini: <span className="text-cyan-300 font-semibold">Cloud</span></span>
-                </div>
-              )}
-            </div>
-
-            <div className="flex-1 overflow-y-auto pr-1 space-y-4 font-sans scrollbar-thin scrollbar-thumb-white/8 scrollbar-track-transparent">
-              {messages.length === 0 && (
-                <div className="h-full flex flex-col items-center justify-center gap-3 text-slate-500 text-center px-6 py-8">
-                  <div className="size-12 rounded-2xl flex items-center justify-center bg-cyan-950/30 border border-cyan-400/20">
-                    <Brain className="w-6 h-6 text-cyan-400/60" />
-                  </div>
-                  <div>
-                    <p className="text-[11px] font-mono uppercase tracking-widest text-slate-500">Aguardando comando</p>
-                    <p className="text-[10px] font-mono text-slate-600 mt-0.5">por texto ou voz...</p>
-                  </div>
-                </div>
-              )}
-              {messages.map((msg, i) => {
-                const isUser = msg.role === "user";
-                return (
-                  <div key={i} className={`flex gap-2.5 ${isUser ? "flex-row-reverse" : "flex-row"} w-full`}>
-                    <div className={`shrink-0 size-7 rounded-full flex items-center justify-center mt-0.5 ${
-                      isUser
-                        ? "bg-gradient-to-br from-blue-600/40 to-cyan-600/30 border border-cyan-400/30"
-                        : "bg-gradient-to-br from-slate-800 to-slate-900 border border-cyan-400/25 shadow-[0_0_10px_rgba(34,211,238,0.18)]"
-                    }`}>
-                      {isUser
-                        ? <User size={13} className="text-cyan-300" />
-                        : <Bot size={13} className="text-cyan-400" />
-                      }
+            {/* Área de Mensagens */}
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+              {messages.length === 0 ? (
+                <div className="h-full flex flex-col justify-center gap-5 py-4">
+                  <div className="flex flex-col items-center text-center gap-2.5 px-4">
+                    <div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-cyan-500/10 border border-cyan-400/25">
+                      <Brain className="w-6 h-6 text-cyan-300" />
                     </div>
-                    <div className={`flex flex-col gap-1 max-w-[85%] ${isUser ? "items-end" : "items-start"}`}>
-                      <div className={`flex items-center gap-1.5 text-[9px] font-mono ${isUser ? "flex-row-reverse" : "flex-row"}`}>
-                        <span className={`font-bold tracking-wider ${isUser ? "text-cyan-400" : "text-blue-300"}`}>
-                          {isUser ? "VOCÊ" : "F.R.Y.I.Vs"}
-                        </span>
-                        <span className="text-slate-600">·</span>
-                        <span className="text-slate-500 tabular-nums">{msg.time}</span>
-                      </div>
+                    <div>
+                      <p className="text-xs font-mono uppercase tracking-[0.2em] text-slate-200 font-semibold">
+                        Núcleo F.R.Y.I.Vs Operacional
+                      </p>
+                      <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                        Envie um comando direto abaixo ou acione o esquadrão especializado.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Quick Starters alinhados aos 4 novos Agentes & Capacidades */}
+                  <div className="grid grid-cols-1 gap-2">
+                    {[
+                      {
+                        icon: Search,
+                        accent: "text-cyan-300",
+                        title: "Pesquisar & Indexar Conhecimento",
+                        desc: "Acionar Agente Pesquisador e salvar na Base da IA",
+                        onClick: () => setAgentsPanelOpen(true),
+                      },
+                      {
+                        icon: FolderKanban,
+                        accent: "text-emerald-300",
+                        title: "Organizar Planilhas e Arquivos",
+                        desc: "Estruturar dados, documentos Word e tabelas Excel",
+                        onClick: () =>
+                          void sendMessageText(
+                            "Delegue ao agente organizador listar e organizar os arquivos de dados do projeto.",
+                          ),
+                      },
+                      {
+                        icon: Lightbulb,
+                        accent: "text-amber-300",
+                        title: "Gerar Ideias para Evoluir a IA",
+                        desc: "Pedir propostas criativas ao Agente de Ideias",
+                        onClick: () =>
+                          void sendMessageText(
+                            "Delegue ao agente ideias propor 3 melhorias inovadoras para a F.R.Y.I.Vs.",
+                          ),
+                      },
+                      {
+                        icon: Code2,
+                        accent: "text-blue-300",
+                        title: "Diagnóstico de Engenharia",
+                        desc: "Consultar arquitetura e saúde do sistema",
+                        onClick: () =>
+                          void sendMessageText("Mostre o status atual de CPU, RAM e resumo da arquitetura."),
+                      },
+                    ].map((card, idx) => {
+                      const CardIcon = card.icon;
+                      return (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={card.onClick}
+                          className="text-left rounded-xl border border-white/8 bg-white/[0.025] hover:bg-cyan-500/[0.07] hover:border-cyan-400/30 p-3 flex items-start gap-3 transition-all cursor-pointer group"
+                        >
+                          <div className="w-8 h-8 rounded-lg bg-black/45 border border-white/10 flex items-center justify-center shrink-0 mt-0.5">
+                            <CardIcon className={`w-4 h-4 ${card.accent}`} />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold text-slate-100 group-hover:text-white">
+                              {card.title}
+                            </p>
+                            <p className="text-[11px] text-slate-400 truncate mt-0.5">{card.desc}</p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                messages.map((msg, i) => {
+                  const isUser = msg.role === "user";
+                  const hasTools = Boolean(msg.tools && msg.tools.length > 0);
+                  const toolsExpanded = Boolean(expandedToolsMsgIdx[i]);
+                  return (
+                    <div
+                      key={i}
+                      className={`flex gap-2.5 ${isUser ? "flex-row-reverse" : "flex-row"} w-full`}
+                    >
                       <div
-                        className={`px-3.5 py-2.5 text-[12.5px] leading-relaxed select-text ${
+                        className={`shrink-0 w-7 h-7 rounded-lg flex items-center justify-center mt-0.5 border ${
                           isUser
-                            ? "rounded-2xl rounded-tr-sm bg-gradient-to-br from-blue-600/30 to-cyan-700/20 border border-cyan-400/25 text-slate-100"
-                            : "rounded-2xl rounded-tl-sm bg-[#091120]/85 border border-white/10 text-slate-200 shadow-[0_2px_16px_rgba(0,0,0,0.5)]"
+                            ? "bg-cyan-500/18 border-cyan-400/35"
+                            : "bg-[#0a1428] border-white/12"
                         }`}
-                        style={{ wordBreak: "break-word", overflowWrap: "anywhere" }}
                       >
-                        <p className="text-pretty whitespace-pre-wrap">{msg.text}</p>
+                        {isUser ? (
+                          <User size={13} className="text-cyan-300" />
+                        ) : (
+                          <Bot size={13} className="text-cyan-400" />
+                        )}
                       </div>
-                      {isAdmin && msg.tools && msg.tools.map((t: any, j: number) => (
-                        <div key={j} className="mt-1 text-[10px] font-mono bg-indigo-950/60 border border-indigo-400/30 text-indigo-200 px-3 py-2 rounded-xl max-w-full break-words">
-                          <span className="text-cyan-300 font-bold">⚡ Executado:</span> <span className="text-white font-semibold">{t.tool}</span>
-                          <span className="text-indigo-200/70 text-[9px] block mt-0.5">{t.result}</span>
+
+                      <div
+                        className={`flex flex-col gap-1 max-w-[86%] min-w-0 ${
+                          isUser ? "items-end" : "items-start"
+                        }`}
+                      >
+                        <div
+                          className={`flex items-center gap-1.5 text-[9.5px] font-mono ${
+                            isUser ? "flex-row-reverse" : "flex-row"
+                          }`}
+                        >
+                          <span
+                            className={`font-semibold tracking-wider ${
+                              isUser ? "text-cyan-300" : "text-slate-300"
+                            }`}
+                          >
+                            {isUser ? "VOCÊ" : "F.R.Y.I.Vs"}
+                          </span>
+                          <span className="text-slate-600">·</span>
+                          <span className="text-slate-500 tabular-nums">{msg.time}</span>
+                          {!isUser && (
+                            <button
+                              type="button"
+                              onClick={() => handleCopyMsg(i, msg.text)}
+                              title="Copiar resposta"
+                              className="text-slate-500 hover:text-cyan-300 transition-colors ml-1 cursor-pointer"
+                            >
+                              {copiedMsgIdx === i ? (
+                                <Check size={11} className="text-emerald-400" />
+                              ) : (
+                                <Copy size={11} />
+                              )}
+                            </button>
+                          )}
                         </div>
-                      ))}
+
+                        <div
+                          className={`px-3.5 py-2.5 text-[12.5px] select-text max-w-full ${
+                            isUser
+                              ? "rounded-2xl rounded-tr-sm bg-cyan-500/18 border border-cyan-400/30 text-white"
+                              : "rounded-2xl rounded-tl-sm bg-[#081121] border border-white/10 text-slate-200"
+                          }`}
+                          style={{ wordBreak: "break-word", overflowWrap: "anywhere" }}
+                        >
+                          {isUser ? (
+                            <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
+                          ) : (
+                            <FormattedText content={msg.text} />
+                          )}
+                        </div>
+
+                        {hasTools && (
+                          <div className="w-full">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setExpandedToolsMsgIdx((prev) => ({
+                                  ...prev,
+                                  [i]: !toolsExpanded,
+                                }))
+                              }
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 text-[10px] font-mono text-cyan-300 cursor-pointer"
+                            >
+                              <Wrench size={10} />
+                              <span>{msg.tools!.length} skill(s) executada(s)</span>
+                              <ChevronDown
+                                size={10}
+                                className={`transition-transform ${toolsExpanded ? "rotate-180" : ""}`}
+                              />
+                            </button>
+
+                            {toolsExpanded && (
+                              <div className="mt-1.5 space-y-1.5">
+                                {msg.tools!.map((t, j) => (
+                                  <div
+                                    key={j}
+                                    className="text-[10px] font-mono bg-[#050b16] border border-cyan-400/20 text-slate-300 px-3 py-2 rounded-xl break-words"
+                                  >
+                                    <span className="text-cyan-300 font-semibold">{t.tool}</span>
+                                    <p className="text-slate-400 text-[9.5px] mt-0.5 line-clamp-4">
+                                      {t.result}
+                                    </p>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
               <div ref={messagesEndRef} />
             </div>
 
-            <form
-              onSubmit={handleSend}
-              className="mt-3 flex items-end gap-2 p-1.5 pl-3 bg-[#060d1a]/90 border border-white/12 rounded-2xl focus-within:border-cyan-400/60 focus-within:shadow-[0_0_20px_rgba(34,211,238,0.25)] transition-all"
-            >
-              <div className="pb-2 text-cyan-400/60 shrink-0 pointer-events-none">
-                <TerminalSquare size={16} />
-              </div>
-              <textarea
-                ref={chatTextareaRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSend(e);
-                  }
-                }}
-                onInput={(e: any) => {
-                  e.target.style.height = "auto";
-                  e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
-                }}
-                placeholder="Digite uma mensagem para a F.R.Y.I.Vs..."
-                aria-label="Campo de mensagem"
-                rows={1}
-                autoComplete="off"
-                autoCorrect="off"
-                spellCheck={false}
-                className="flex-1 bg-transparent border-0 outline-none resize-none py-1.5 text-[13px] leading-relaxed text-white placeholder-slate-500 font-sans max-h-32 min-h-[36px] overflow-y-auto"
-                style={{ height: "auto" }}
-              />
-              <button
-                type="submit"
-                disabled={!input.trim()}
-                aria-label="Enviar mensagem"
-                title="Enviar mensagem (Enter)"
-                className="size-9 shrink-0 flex items-center justify-center rounded-xl bg-gradient-to-r from-cyan-400 to-blue-500 hover:from-cyan-300 hover:to-blue-400 text-slate-950 font-bold transition-all shadow-[0_0_15px_rgba(34,211,238,0.35)] disabled:opacity-25 disabled:pointer-events-none disabled:shadow-none active:scale-95 mb-0.5"
+            {/* Composer */}
+            <div className="p-4 pt-2 border-t border-white/8 bg-[#050c1a]/70">
+              <form
+                onSubmit={handleSend}
+                className="flex items-end gap-2 p-1.5 pl-3 bg-[#070f20] border border-white/12 rounded-2xl focus-within:border-cyan-400/55 transition-all"
               >
-                <SendHorizontal size={17} className="text-slate-950" />
-              </button>
-            </form>
+                <div className="pb-2 text-cyan-400/70 shrink-0 pointer-events-none">
+                  <TerminalSquare size={16} />
+                </div>
+                <textarea
+                  ref={chatTextareaRef}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSend(e);
+                    }
+                  }}
+                  onInput={(e: any) => {
+                    e.target.style.height = "auto";
+                    e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
+                  }}
+                  placeholder="Comande a F.R.Y.I.Vs..."
+                  aria-label="Campo de mensagem"
+                  rows={1}
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="flex-1 bg-transparent border-0 outline-none resize-none py-1.5 text-[13px] leading-relaxed text-white placeholder-slate-500 font-sans max-h-32 min-h-[36px] overflow-y-auto"
+                />
+                <button
+                  type="submit"
+                  disabled={!input.trim()}
+                  aria-label="Enviar mensagem"
+                  title="Enviar mensagem (Enter)"
+                  className="w-9 h-9 shrink-0 flex items-center justify-center rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-bold transition-all disabled:opacity-25 disabled:pointer-events-none cursor-pointer mb-0.5"
+                >
+                  <SendHorizontal size={16} />
+                </button>
+              </form>
+            </div>
           </div>
         )}
-      </div>
+      </section>
 
+      {/* Drawers Modulares: Esquadrão de 4 Agentes & Base de Conhecimento */}
       <AgentsControlPanel
         sessionToken={e2eeSessionToken}
         isOpen={agentsPanelOpen}
         onClose={() => setAgentsPanelOpen(false)}
+        onKnowledgeIndexed={(total) => setKbChunksCount(total)}
+        onJobsBadgeChange={setAgentsBadgeCount}
+      />
+
+      <KnowledgeBaseDrawer
+        sessionToken={e2eeSessionToken}
+        isOpen={kbDrawerOpen}
+        onClose={() => setKbDrawerOpen(false)}
+        onStatusUpdated={(total) => setKbChunksCount(total)}
       />
 
       {!e2eeChecking && e2eeRequired && !e2eeUnlocked && (

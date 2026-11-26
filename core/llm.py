@@ -285,7 +285,7 @@ _ACTION_AND_COMMAND_TOKENS: tuple[str, ...] = (
     "link", "site", "pagina", "rolar", "role", "volte", "voltar", "desca", "suba",
     "primeiro", "segundo", "terceiro", "quarto", "quinto", "video", "aba", "resultado",
     "planilha", "documento", "arquivo", "pasta", "agend", "mapa", "grafo", "http", "www",
-    "bateria", "status", "cpu", "ram", "disco", "telemetria",
+    "bateria", "status", "cpu", "ram", "disco", "telemetria", "monitor",
     "n8n", "hermes", "agente", "agentes", "workflow", "webhook", "deleg",
 )
 

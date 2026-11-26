@@ -25,7 +25,7 @@ from core.agent_orchestrator import (
 class DelegarMissaoHermesParams(BaseModel):
     perfil: HermesProfileName = Field(
         ...,
-        description="Perfil especialista Hermes: 'pesquisador', 'engenheiro', 'analista' ou 'sentinela'.",
+        description="Perfil especialista: 'pesquisador', 'organizador', 'ideias' ou 'engenheiro'.",
     )
     missao: str = Field(
         ...,
@@ -72,7 +72,7 @@ class ListarPerfisHermesParams(BaseModel):
 
 
 def delegar_missao_hermes(
-    perfil: Literal["pesquisador", "engenheiro", "analista", "sentinela"],
+    perfil: Literal["pesquisador", "organizador", "ideias", "engenheiro"],
     missao: str,
     contexto: str = "",
     contexto_externo: bool = False,
@@ -231,8 +231,8 @@ HERMES_SCHEMAS: Final[list[dict[str, Any]]] = [
                 "properties": {
                     "perfil": {
                         "type": "string",
-                        "enum": ["pesquisador", "engenheiro", "analista", "sentinela"],
-                        "description": "Perfil especialista Hermes que executará a missão.",
+                        "enum": ["pesquisador", "organizador", "ideias", "engenheiro"],
+                        "description": "Perfil especialista que executará a missão.",
                     },
                     "missao": {
                         "type": "string",

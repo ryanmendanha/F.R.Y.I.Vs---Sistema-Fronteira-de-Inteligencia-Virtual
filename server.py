@@ -93,7 +93,12 @@ from core.skill_router import get_skill_router
 from core.stt import gravar_audio, transcrever
 from core.tts import falar
 from core.vector_db import get_or_create_collection
-from core.knowledge_base import indexar as kb_indexar, buscar_conhecimento, status as kb_status
+from core.knowledge_base import (
+    buscar_conhecimento,
+    indexar as kb_indexar,
+    listar_documentos_conhecimento,
+    status as kb_status,
+)
 from skills import ALL_SKILL_SCHEMAS, SKILLS_REGISTRY, execute_skill
 
 _server_loop: asyncio.AbstractEventLoop | None = None
@@ -811,6 +816,18 @@ async def direct_execute_skill(
 def knowledge_status() -> dict[str, Any]:
     """Retorna o estado da base de conhecimento indexada no ChromaDB."""
     return kb_status()
+
+
+@app.get("/api/knowledge/documents")
+def knowledge_documents(
+    limit: int = Query(default=40, ge=1, le=200),
+    _e2ee: E2EESessionRecord | None = Depends(require_e2ee_session),
+) -> dict[str, Any]:
+    """Lista os documentos disponíveis na Base de Conhecimento da F.R.Y.I.Vs."""
+    return {
+        "status": kb_status(),
+        "documents": listar_documentos_conhecimento(limit=limit),
+    }
 
 
 @app.post("/api/knowledge/reindex")

@@ -515,7 +515,7 @@ class TestHermesOrchestratorBridge:
             http_transport=httpx.MockTransport(_offline_handler),
         )
 
-        job = orch.submit_job("analista", "Auditar planilha trimestral", dispatch_background=False)
+        job = orch.submit_job("organizador", "Auditar planilha trimestral", dispatch_background=False)
         finished = asyncio.run(orch.execute_job_async(job.job_id))
         assert finished is not None
         assert finished.status == "offline"
@@ -523,6 +523,90 @@ class TestHermesOrchestratorBridge:
         assert "setup_hermes_wsl.sh" in finished.error
         assert orch.budget_guard.get_snapshot()["active_concurrent"] == 0
         assert orch.get_status()["hermes"]["state"] == "offline"
+
+    def test_only_four_approved_profiles_allowed(self, tmp_path: Path):
+        assert set(HERMES_PROFILES.keys()) == {"pesquisador", "organizador", "ideias", "engenheiro"}
+        policy = PolicyEngine(audit_log_path=tmp_path / "profiles_audit.jsonl")
+        orch = AgentOrchestrator(policy_engine=policy, budget_guard=BudgetGuard())
+        for removed_profile in ("sentinela", "analista"):
+            with pytest.raises(ValueError, match="Perfil Hermes inválido"):
+                orch.submit_job(removed_profile, "Missão antiga", dispatch_background=False)
+
+    def test_native_specialist_fallback_executes_tools_for_all_profiles(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ):
+        def _offline_handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("Connection refused", request=request)
+
+        monkeypatch.setattr("core.gemini_client.is_gemini_configured", lambda: False)
+        import ollama as _ollama_mod
+        monkeypatch.setattr(
+            _ollama_mod,
+            "Client",
+            lambda *a, **kw: type(
+                "_FastNoOllama",
+                (),
+                {"chat": lambda self, **ck: (_ for _ in ()).throw(ConnectionError("offline"))},
+            )(),
+        )
+        monkeypatch.setattr(
+            _ollama_mod,
+            "chat",
+            lambda **ck: (_ for _ in ()).throw(ConnectionError("offline")),
+        )
+
+        def _fake_pesquisar_web(termo: str = "") -> str:
+            return (
+                f"Informações encontradas na internet:\n"
+                f"• Python (https://www.python.org): Linguagem de alto nível focada em legibilidade e IA."
+            )
+
+        monkeypatch.setitem(
+            __import__("skills").SKILLS_REGISTRY,
+            "pesquisar_informacao_web",
+            _fake_pesquisar_web,
+        )
+
+        policy = PolicyEngine(audit_log_path=tmp_path / "native_audit.jsonl")
+        orch = AgentOrchestrator(
+            policy_engine=policy,
+            budget_guard=BudgetGuard(max_concurrent_agents=2),
+            http_transport=httpx.MockTransport(_offline_handler),
+            native_fallback_enabled=True,
+        )
+        assert orch.get_status()["hermes"]["state"] == "native"
+        assert orch.get_status()["hermes"]["engine_mode"] == "native_fryivs"
+
+        job_pesq = orch.submit_job("pesquisador", "pesquise sobre python", dispatch_background=False)
+        res_pesq = asyncio.run(orch.execute_job_async(job_pesq.job_id))
+        assert res_pesq is not None
+        assert res_pesq.status == "completed"
+        assert res_pesq.transport == "native_fryivs"
+        assert res_pesq.steps_completed >= 1
+        assert "python" in res_pesq.result.lower()
+
+        job_org = orch.submit_job("organizador", "organize arquivos do projeto", dispatch_background=False)
+        res_org = asyncio.run(orch.execute_job_async(job_org.job_id))
+        assert res_org is not None
+        assert res_org.status == "completed"
+        assert res_org.transport == "native_fryivs"
+        assert res_org.steps_completed >= 1
+
+        job_ideias = orch.submit_job("ideias", "sugira melhorias para minha IA", dispatch_background=False)
+        res_ideias = asyncio.run(orch.execute_job_async(job_ideias.job_id))
+        assert res_ideias is not None
+        assert res_ideias.status == "completed"
+        assert res_ideias.transport == "native_fryivs"
+        assert res_ideias.steps_completed >= 1
+
+        job_eng = orch.submit_job("engenheiro", "resuma a arquitetura", dispatch_background=False)
+        res_eng = asyncio.run(orch.execute_job_async(job_eng.job_id))
+        assert res_eng is not None
+        assert res_eng.status == "completed"
+        assert res_eng.transport == "native_fryivs"
+        assert orch.budget_guard.get_snapshot()["active_concurrent"] == 0
 
     def test_tainted_delegation_approval_and_kill_switch(self, tmp_path: Path):
         policy = PolicyEngine(audit_log_path=tmp_path / "audit.jsonl")
@@ -553,7 +637,7 @@ class TestHermesOrchestratorBridge:
         assert orch.budget_guard.get_snapshot()["active_concurrent"] == 1
 
         # 2. Segundo job ocupa slot 2/2; terceiro é rejeitado
-        job2 = orch.submit_job("sentinela", "Monitorar SLA", dispatch_background=False)
+        job2 = orch.submit_job("ideias", "Gerar ideias de evolução", dispatch_background=False)
         assert orch.budget_guard.get_snapshot()["active_concurrent"] == 2
         with pytest.raises(ConcurrencyLimitExceededError):
             orch.submit_job("pesquisador", "Terceiro job simultâneo", dispatch_background=False)
@@ -565,7 +649,7 @@ class TestHermesOrchestratorBridge:
         assert orch.budget_guard.get_snapshot()["active_concurrent"] == 1
 
         # 4. Kill-Switch encerra tudo instantaneamente
-        orch.submit_job("analista", "Job extra", dispatch_background=False)
+        orch.submit_job("organizador", "Job extra", dispatch_background=False)
         kill_res = orch.kill_all_jobs(actor="senhor")
         assert kill_res["killed_count"] == 2
         assert orch.budget_guard.get_snapshot()["active_concurrent"] == 0
@@ -742,7 +826,7 @@ class TestHmacCallbackAndRouter:
             "/api/agents/delegate",
             headers=auth_headers,
             json={
-                "profile": "analista",
+                "profile": "organizador",
                 "task": "Processar CSV baixado da internet",
                 "context": "dados web",
                 "context_tainted": True,
@@ -764,7 +848,7 @@ class TestHmacCallbackAndRouter:
 
         # 5. Callback HMAC-SHA256
         # Cria job aguardando callback (sem despacho background)
-        cb_job = orch.submit_job("sentinela", "Verificar uptime", dispatch_background=False)
+        cb_job = orch.submit_job("ideias", "Gerar ideias para a IA", dispatch_background=False)
         cb_payload = {
             "job_id": cb_job.job_id,
             "correlation_id": cb_job.correlation_id,
@@ -924,10 +1008,128 @@ class TestHermesSkillsAndWslScript:
         assert "set -euo pipefail" in text
         assert ".hermes" in text
         assert "/mnt/*" in text
-        for profile in ("pesquisador", "engenheiro", "analista", "sentinela"):
+        for profile in ("pesquisador", "organizador", "ideias", "engenheiro"):
             assert profile in text
+        assert "analista" not in text
+        assert "sentinela" not in text
         assert "API_SERVER_ENABLED" in text
         assert "8642" in text
         assert "127.0.0.1" in text
         assert "hermes gateway run" in text
         assert "tmux" in text
+
+    def test_index_job_to_kb_and_discard_flow(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ):
+        from core import knowledge_base
+
+        fake_kb_dir = tmp_path / "base_conhecimento"
+        fake_kb_dir.mkdir(parents=True, exist_ok=True)
+        fake_manifest = tmp_path / "kb_manifest.json"
+        monkeypatch.setattr(knowledge_base, "BASE_CONHECIMENTO_PATH", fake_kb_dir)
+        monkeypatch.setattr(knowledge_base, "_MANIFEST_PATH", fake_manifest)
+
+        # Coleção em memória simulada para isolar totalmente do ChromaDB real
+        stored_docs: dict[str, tuple[str, dict[str, Any]]] = {}
+
+        class _FakeCollection:
+            def upsert(self, ids, documents, metadatas):
+                for cid, doc, meta in zip(ids, documents, metadatas):
+                    stored_docs[cid] = (doc, meta)
+
+            def count(self):
+                return len(stored_docs)
+
+            def get(self, include=None, where=None):
+                ids = list(stored_docs.keys())
+                docs = [stored_docs[i][0] for i in ids]
+                metas = [stored_docs[i][1] for i in ids]
+                return {"ids": ids, "documents": docs, "metadatas": metas}
+
+            def query(self, query_texts, n_results=5, include=None, where=None):
+                ids = list(stored_docs.keys())[:n_results]
+                docs = [stored_docs[i][0] for i in ids]
+                metas = [stored_docs[i][1] for i in ids]
+                dists = [0.25 for _ in ids]
+                return {
+                    "ids": [ids],
+                    "documents": [docs],
+                    "metadatas": [metas],
+                    "distances": [dists],
+                }
+
+        fake_col = _FakeCollection()
+        monkeypatch.setattr(knowledge_base, "_get_colecao", lambda: fake_col)
+        knowledge_base._invalidar_cache_bm25()
+
+        monkeypatch.setenv("FRYIVS_VOICE_PASSWORD", "SenhaCuradoria#2026!")
+        monkeypatch.delenv("FRYIVS_VOICE_PASSWORD_HASH", raising=False)
+        e2ee_auth.reset_e2ee_state(lock_enforcement=True)
+
+        def _research_mock(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    "## Arquitetura QuantumRAG\n"
+                                    "O protocolo QuantumRAG combina BM25 léxico com vetores densos."
+                                )
+                            }
+                        }
+                    ],
+                    "usage": {"total_tokens": 180},
+                    "steps": 2,
+                },
+            )
+
+        policy = reset_policy_engine(audit_log_path=tmp_path / "curadoria_audit.jsonl")
+        orch = reset_orchestrator(
+            policy_engine=policy,
+            budget_guard=BudgetGuard(),
+            http_transport=httpx.MockTransport(_research_mock),
+        )
+
+        app = _build_test_app()
+        client = TestClient(app)
+        token = _unlock_e2ee_session(client, "SenhaCuradoria#2026!")
+        headers = {"X-E2EE-Session": token}
+
+        # 1. Cria e conclui pesquisa
+        j1 = orch.submit_job("pesquisador", "Pesquisar protocolo QuantumRAG", dispatch_background=False)
+        asyncio.run(orch.execute_job_async(j1.job_id))
+        assert orch.get_job(j1.job_id).status == "completed"
+
+        # 2. Indexa na Base de Conhecimento via endpoint REST E2EE
+        idx_res = client.post(
+            f"/api/agents/jobs/{j1.job_id}/index-kb",
+            headers=headers,
+            json={"titulo": "Dossiê QuantumRAG", "tags": ["rag", "pesquisa"]},
+        )
+        assert idx_res.status_code == 200, idx_res.text
+        idx_json = idx_res.json()
+        assert idx_json["ok"] is True
+        assert idx_json["job"]["kb_status"] == "indexed"
+        assert idx_json["kb_info"]["chunks_indexados"] >= 1
+        assert (fake_kb_dir / idx_json["kb_info"]["arquivo"]).exists()
+
+        # Busca imediata encontra o conteúdo recém-indexado!
+        found = knowledge_base.buscar_conhecimento("QuantumRAG BM25")
+        assert "QuantumRAG" in found
+
+        # 3. Cria segunda pesquisa e aciona Descartar -> some de list_jobs e não grava arquivo extra
+        files_before = list((fake_kb_dir / "agentes_curados").glob("*.md"))
+        j2 = orch.submit_job("pesquisador", "Pesquisa descartável temporária", dispatch_background=False)
+        asyncio.run(orch.execute_job_async(j2.job_id))
+
+        disc_res = client.post(f"/api/agents/jobs/{j2.job_id}/discard", headers=headers)
+        assert disc_res.status_code == 200, disc_res.text
+        assert disc_res.json()["discarded"] is True
+        assert orch.get_job(j2.job_id).kb_status == "discarded"
+        assert all(item.job_id != j2.job_id for item in orch.list_jobs())
+        files_after = list((fake_kb_dir / "agentes_curados").glob("*.md"))
+        assert len(files_after) == len(files_before)

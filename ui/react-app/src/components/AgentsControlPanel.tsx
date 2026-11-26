@@ -3,15 +3,18 @@ import type { FC, FormEvent } from "react";
 import {
   Activity,
   AlertTriangle,
-  BarChart3,
+  BookPlus,
   Bot,
   Check,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Clock,
   Code2,
   Cpu,
-  Eye,
+  FolderKanban,
   Gauge,
+  Lightbulb,
   Loader2,
   OctagonX,
   RefreshCw,
@@ -20,18 +23,21 @@ import {
   ShieldAlert,
   ShieldCheck,
   Sparkles,
+  Trash2,
   X,
   XCircle,
-  Zap,
 } from "lucide-react";
+import { FormattedText } from "@/components/FormattedText";
 
 export interface AgentsControlPanelProps {
   sessionToken: string | null;
   isOpen: boolean;
   onClose: () => void;
+  onKnowledgeIndexed?: (totalChunks: number) => void;
+  onJobsBadgeChange?: (count: number) => void;
 }
 
-type HermesProfileName = "pesquisador" | "engenheiro" | "analista" | "sentinela";
+export type HermesProfileName = "pesquisador" | "organizador" | "ideias" | "engenheiro";
 
 type AgentJobStatus =
   | "queued"
@@ -42,6 +48,8 @@ type AgentJobStatus =
   | "cancelled"
   | "killed"
   | "offline";
+
+type KBReviewStatus = "pending_review" | "indexed" | "discarded";
 
 interface HermesProfileInfo {
   name: HermesProfileName;
@@ -71,6 +79,9 @@ interface AgentJobItem {
   result: string;
   error: string;
   transport: string;
+  kb_status?: KBReviewStatus;
+  kb_file?: string;
+  kb_chunks?: number;
 }
 
 interface PendingApprovalItem {
@@ -107,7 +118,9 @@ interface AgentsStatusResponse {
   hermes: {
     api_url: string;
     online: boolean;
-    state: "online" | "offline" | "standby";
+    state: "online" | "native" | "offline" | "standby";
+    engine_mode?: "hermes_wsl2" | "native_fryivs" | "offline";
+    native_fallback_enabled?: boolean;
     detail: string;
     redis_configured: boolean;
     profiles: HermesProfileInfo[];
@@ -122,40 +135,63 @@ const DEFAULT_PROFILES: HermesProfileInfo[] = [
   {
     name: "pesquisador",
     label: "Pesquisador",
-    mission: "Pesquisas longitudinais, benchmarks, papers e monitoramento de mercado.",
-    tools: ["web_search", "browser", "mcp_rag_read"],
-    sandbox: "Restrito (somente leitura)",
+    mission: "Pesquisas aprofundadas na web, artigos, benchmarks e dossiês prontos para indexar na IA.",
+    tools: ["pesquisar_informacao_web", "consultar_mapa_codigo"],
+    sandbox: "Restrito (somente leitura + curadoria KB)",
     model_alias: "hermes/pesquisador",
     default_max_steps: 15,
   },
   {
+    name: "organizador",
+    label: "Organizador de Dados",
+    mission: "Estruturação, limpeza e catalogação de planilhas Excel/CSV, documentos Word e pastas de dados.",
+    tools: ["gerenciar_arquivos", "consultar_planilha", "criar_planilha", "ler_documento_word"],
+    sandbox: "Workspace de dados e documentos locais",
+    model_alias: "hermes/organizador",
+    default_max_steps: 15,
+  },
+  {
+    name: "ideias",
+    label: "Agente de Ideias",
+    mission: "Geração de novas skills, automações, fluxos cognitivos e propostas de evolução para a F.R.Y.I.Vs.",
+    tools: ["resumo_arquitetura_sistema", "consultar_mapa_codigo", "pesquisar_informacao_web"],
+    sandbox: "Somente leitura arquitetural + pesquisa criativa",
+    model_alias: "hermes/ideias",
+    default_max_steps: 12,
+  },
+  {
     name: "engenheiro",
     label: "Engenheiro",
-    mission: "Desenvolvimento, refatoração, testes e auditoria de repositórios.",
-    tools: ["terminal_sandbox", "git", "mcp_graphify"],
-    sandbox: "Workspace isolado / Docker",
+    mission: "Auditoria técnica de código, grafo arquitetural (Graphify), diagnóstico de módulos e performance.",
+    tools: ["consultar_mapa_codigo", "explicar_modulo_grafo", "caminho_entre_componentes"],
+    sandbox: "Inspeção técnica e grafo de código",
     model_alias: "hermes/engenheiro",
     default_max_steps: 15,
   },
-  {
-    name: "analista",
-    label: "Analista",
-    mission: "ETL, análise Pandas/SQL, relatórios executivos e planilhas.",
-    tools: ["python_sandbox", "mcp_filesystem_restricted", "n8n_read"],
-    sandbox: "Pasta dedicada de dados",
-    model_alias: "hermes/analista",
-    default_max_steps: 15,
-  },
-  {
-    name: "sentinela",
-    label: "Sentinela 24/7",
-    mission: "Monitoramento contínuo via Hermes Cron, triagem e alertas HMAC.",
-    tools: ["hermes_cron", "webhooks_hmac", "mcp_n8n_notify"],
-    sandbox: "Somente leitura + alertas",
-    model_alias: "hermes/sentinela",
-    default_max_steps: 10,
-  },
 ];
+
+const PROFILE_SUGGESTIONS: Record<HermesProfileName, string[]> = {
+  pesquisador: [
+    "Pesquise boas práticas de RAG híbrido em 2026",
+    "Pesquise novidades do ecossistema Python 3.13",
+    "Pesquise arquiteturas de agentes autônomos seguros",
+  ],
+  organizador: [
+    "Liste e categorize os arquivos de dados do projeto",
+    "Estruture um modelo de planilha financeira mensal",
+    "Catalogue documentos disponíveis para organização",
+  ],
+  ideias: [
+    "Proponha 5 novas skills de alto impacto para a F.R.Y.I.Vs",
+    "Sugira automações com n8n para produtividade diária",
+    "Ideias para evoluir a memória e proatividade da IA",
+  ],
+  engenheiro: [
+    "Audite os módulos centrais e conexões da arquitetura",
+    "Explique o fluxo entre servidor, pipeline e memória",
+    "Identifique gargalos técnicos no mapa de código",
+  ],
+};
 
 function buildAuthHeaders(
   sessionToken: string | null,
@@ -178,6 +214,7 @@ function formatElapsed(seconds: number): string {
 
 function getProfileMeta(profile: HermesProfileName): {
   badgeClass: string;
+  selectedBorder: string;
   accentText: string;
   icon: typeof Search;
 } {
@@ -185,26 +222,30 @@ function getProfileMeta(profile: HermesProfileName): {
     case "pesquisador":
       return {
         badgeClass: "bg-cyan-500/15 border-cyan-400/35 text-cyan-200",
+        selectedBorder: "border-cyan-400/60 bg-cyan-500/12 shadow-[0_0_20px_rgba(34,211,238,0.16)]",
         accentText: "text-cyan-300",
         icon: Search,
+      };
+    case "organizador":
+      return {
+        badgeClass: "bg-emerald-500/15 border-emerald-400/35 text-emerald-200",
+        selectedBorder: "border-emerald-400/60 bg-emerald-500/12 shadow-[0_0_20px_rgba(16,185,129,0.16)]",
+        accentText: "text-emerald-300",
+        icon: FolderKanban,
+      };
+    case "ideias":
+      return {
+        badgeClass: "bg-amber-500/15 border-amber-400/35 text-amber-200",
+        selectedBorder: "border-amber-400/60 bg-amber-500/12 shadow-[0_0_20px_rgba(245,158,11,0.16)]",
+        accentText: "text-amber-300",
+        icon: Lightbulb,
       };
     case "engenheiro":
       return {
         badgeClass: "bg-blue-500/15 border-blue-400/35 text-blue-200",
+        selectedBorder: "border-blue-400/60 bg-blue-500/12 shadow-[0_0_20px_rgba(59,130,246,0.16)]",
         accentText: "text-blue-300",
         icon: Code2,
-      };
-    case "analista":
-      return {
-        badgeClass: "bg-emerald-500/15 border-emerald-400/35 text-emerald-200",
-        accentText: "text-emerald-300",
-        icon: BarChart3,
-      };
-    case "sentinela":
-      return {
-        badgeClass: "bg-amber-500/15 border-amber-400/35 text-amber-200",
-        accentText: "text-amber-300",
-        icon: Eye,
       };
   }
 }
@@ -258,21 +299,24 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
   sessionToken,
   isOpen,
   onClose,
+  onKnowledgeIndexed,
+  onJobsBadgeChange,
 }) => {
   const [statusData, setStatusData] = useState<AgentsStatusResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [bannerMsg, setBannerMsg] = useState<string | null>(null);
 
-  // Estado do formulário rápido de delegação
   const [selectedProfile, setSelectedProfile] = useState<HermesProfileName>("pesquisador");
   const [taskInput, setTaskInput] = useState("");
   const [contextTainted, setContextTainted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // Estados de ações em andamento
   const [killingAll, setKillingAll] = useState(false);
   const [busyJobIds, setBusyJobIds] = useState<Record<string, boolean>>({});
+  const [indexingJobIds, setIndexingJobIds] = useState<Record<string, boolean>>({});
+  const [discardingJobIds, setDiscardingJobIds] = useState<Record<string, boolean>>({});
+  const [expandedJobIds, setExpandedJobIds] = useState<Record<string, boolean>>({});
   const [busyApprovalIds, setBusyApprovalIds] = useState<Record<string, boolean>>({});
 
   const mountedRef = useRef(true);
@@ -297,7 +341,7 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
 
         if (res.status === 423) {
           if (mountedRef.current) {
-            setError("Sessão E2EE bloqueada. Desbloqueie o cofre para gerenciar subagentes.");
+            setError("Sessão E2EE bloqueada. Desbloqueie o cofre para gerenciar agentes.");
           }
           return;
         }
@@ -310,6 +354,13 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
         if (mountedRef.current) {
           setStatusData(data);
           setError(null);
+          const actionableCount = (data.jobs || []).filter(
+            (j) =>
+              j.status === "running" ||
+              j.status === "queued" ||
+              (j.status === "completed" && j.kb_status !== "indexed"),
+          ).length;
+          onJobsBadgeChange?.(actionableCount);
         }
       } catch (err) {
         if (mountedRef.current) {
@@ -325,10 +376,9 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
         }
       }
     },
-    [sessionToken],
+    [sessionToken, onJobsBadgeChange],
   );
 
-  // Polling periódico enquanto o painel estiver aberto
   useEffect(() => {
     if (!isOpen) return;
     void fetchStatus(false);
@@ -338,7 +388,6 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
     return () => window.clearInterval(interval);
   }, [isOpen, fetchStatus]);
 
-  // Fechar com Escape
   useEffect(() => {
     if (!isOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -380,14 +429,77 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
       setContextTainted(false);
       setBannerMsg(
         body.requires_approval
-          ? "Missão marcada como contexto externo: aguardando aprovação explícita Tier 3."
-          : `Missão delegada ao perfil '${selectedProfile}' em segundo plano.`,
+          ? "Contexto externo detectado: aguardando sua aprovação explícita Tier 3."
+          : `Missão enviada ao agente '${selectedProfile}'. Ao concluir, você poderá Indexar na Base de Conhecimento ou Descartar.`,
       );
       await fetchStatus(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao delegar missão.");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleIndexJobToKB = async (job: AgentJobItem) => {
+    setIndexingJobIds((prev) => ({ ...prev, [job.job_id]: true }));
+    setError(null);
+    setBannerMsg(null);
+    try {
+      const res = await fetch(`/api/agents/jobs/${encodeURIComponent(job.job_id)}/index-kb`, {
+        method: "POST",
+        headers: buildAuthHeaders(sessionToken, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ titulo: job.task.slice(0, 110) }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        detail?: string;
+        kb_info?: { chunks_indexados?: number; total_chunks_base?: number; arquivo?: string };
+      };
+      if (!res.ok) {
+        throw new Error(body.detail || `Falha ao indexar na Base de Conhecimento (HTTP ${res.status}).`);
+      }
+      const chunks = body.kb_info?.chunks_indexados ?? 1;
+      const total = body.kb_info?.total_chunks_base;
+      if (typeof total === "number") {
+        onKnowledgeIndexed?.(total);
+      }
+      setBannerMsg(
+        `Conhecimento indexado com sucesso na F.R.Y.I.Vs (${chunks} chunk(s) adicionados ao ChromaDB + BM25)!`,
+      );
+      await fetchStatus(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Falha ao indexar na Base de Conhecimento.");
+    } finally {
+      setIndexingJobIds((prev) => ({ ...prev, [job.job_id]: false }));
+    }
+  };
+
+  const handleDiscardJob = async (jobId: string) => {
+    setDiscardingJobIds((prev) => ({ ...prev, [jobId]: true }));
+    setError(null);
+    setBannerMsg(null);
+    try {
+      const res = await fetch(`/api/agents/jobs/${encodeURIComponent(jobId)}/discard`, {
+        method: "POST",
+        headers: buildAuthHeaders(sessionToken),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { detail?: string };
+        throw new Error(body.detail || `Erro ao descartar resultado (HTTP ${res.status}).`);
+      }
+      setStatusData((prev) =>
+        prev
+          ? {
+              ...prev,
+              jobs: prev.jobs.filter((j) => j.job_id !== jobId),
+            }
+          : prev,
+      );
+      setBannerMsg("Resultado descartado e removido da fila sem alterar a Base de Conhecimento.");
+      await fetchStatus(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Falha ao descartar missão.");
+    } finally {
+      setDiscardingJobIds((prev) => ({ ...prev, [jobId]: false }));
     }
   };
 
@@ -403,7 +515,7 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
         const body = (await res.json().catch(() => ({}))) as { detail?: string };
         throw new Error(body.detail || `Erro ao cancelar missão (HTTP ${res.status}).`);
       }
-      setBannerMsg(`Missão ${jobId.slice(0, 8)} cancelada.`);
+      setBannerMsg(`Missão #${jobId.slice(0, 8)} cancelada.`);
       await fetchStatus(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha ao cancelar missão.");
@@ -489,14 +601,9 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
     max_tokens_per_job: 32000,
   };
 
-  const hermesState = statusData?.hermes.state ?? "standby";
+  const hermesState = statusData?.hermes.state ?? "native";
   const usdPct = Math.min(100, Math.max(0, budget.usd_utilization_pct));
-  const budgetBarColor =
-    usdPct >= 90
-      ? "from-red-500 to-rose-400"
-      : usdPct >= 70
-        ? "from-amber-400 to-orange-500"
-        : "from-cyan-400 to-blue-500";
+  const suggestions = PROFILE_SUGGESTIONS[selectedProfile] ?? [];
 
   return (
     <div
@@ -506,34 +613,27 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
       aria-labelledby="agents-control-panel-title"
       onClick={onClose}
     >
-      {/* Brilhos ambientais cyan/blue */}
-      <div className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="absolute -top-24 right-24 w-[420px] h-[420px] rounded-full bg-cyan-500/10 blur-[130px]" />
-        <div className="absolute bottom-0 right-1/3 w-[360px] h-[360px] rounded-full bg-blue-600/12 blur-[120px]" />
-      </div>
-
-      {/* Drawer principal */}
       <div
-        className="relative w-full max-w-2xl h-full flex flex-col border-l border-cyan-400/25 bg-[#050b18]/95 text-slate-200 shadow-[0_0_90px_rgba(6,182,212,0.2)] backdrop-blur-3xl"
+        className="relative w-full max-w-2xl h-full flex flex-col border-l border-cyan-400/25 bg-[#050b18]/96 text-slate-200 shadow-[0_0_90px_rgba(6,182,212,0.18)]"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-white/10 bg-[#060f22]/90">
+        {/* Header Compacto */}
+        <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-white/10 bg-[#060f22]/92">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500/20 to-blue-600/25 border border-cyan-400/40 flex items-center justify-center shadow-[0_0_20px_rgba(34,211,238,0.22)] shrink-0">
+            <div className="w-10 h-10 rounded-xl bg-cyan-500/15 border border-cyan-400/35 flex items-center justify-center shrink-0">
               <Bot className="w-5 h-5 text-cyan-300" />
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <h2
                   id="agents-control-panel-title"
-                  className="text-sm font-bold tracking-[0.18em] uppercase text-white truncate"
+                  className="text-sm font-bold tracking-[0.16em] uppercase text-white truncate"
                 >
-                  Central Multi-Agente
+                  Esquadrão de Agentes
                 </h2>
                 <span
                   className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono uppercase tracking-wider border ${
-                    hermesState === "online"
+                    hermesState === "online" || hermesState === "native"
                       ? "bg-emerald-500/15 border-emerald-400/40 text-emerald-300"
                       : hermesState === "offline"
                         ? "bg-red-500/15 border-red-400/35 text-red-300"
@@ -542,18 +642,24 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
                 >
                   <span
                     className={`w-1.5 h-1.5 rounded-full ${
-                      hermesState === "online"
+                      hermesState === "online" || hermesState === "native"
                         ? "bg-emerald-400 animate-pulse"
                         : hermesState === "offline"
                           ? "bg-red-400"
                           : "bg-cyan-400"
                     }`}
                   />
-                  Hermes {hermesState === "online" ? "Online" : hermesState === "offline" ? "Offline" : "Standby"}
+                  {hermesState === "online"
+                    ? "Hermes WSL2 Online"
+                    : hermesState === "native"
+                      ? "Motor Nativo Ativo"
+                      : hermesState === "offline"
+                        ? "Offline"
+                        : "Standby"}
                 </span>
               </div>
               <p className="text-[11px] font-mono text-slate-400 truncate mt-0.5">
-                Hermes WSL2 (127.0.0.1:8642) · Policy Engine · Budget Guard
+                Pesquisador · Organizador de Dados · Agente de Ideias · Engenheiro
               </p>
             </div>
           </div>
@@ -563,7 +669,7 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
               type="button"
               onClick={() => void fetchStatus(true)}
               disabled={loading}
-              title="Atualizar e sondar Hermes WSL2"
+              title="Atualizar status dos agentes"
               className="p-2 rounded-xl border border-white/10 bg-white/5 hover:border-cyan-400/40 hover:text-cyan-300 text-slate-400 transition-all cursor-pointer disabled:opacity-50"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin text-cyan-300" : ""}`} />
@@ -573,7 +679,7 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
               type="button"
               onClick={() => void handleKillAll()}
               disabled={killingAll}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-red-500/20 hover:bg-red-500/30 border border-red-400/50 text-red-200 hover:text-white text-[11px] font-bold uppercase tracking-wider shadow-[0_0_20px_rgba(239,68,68,0.25)] transition-all cursor-pointer disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-red-500/18 hover:bg-red-500/28 border border-red-400/45 text-red-200 hover:text-white text-[11px] font-bold uppercase tracking-wider transition-all cursor-pointer disabled:opacity-50"
             >
               {killingAll ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -586,7 +692,7 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
             <button
               type="button"
               onClick={onClose}
-              aria-label="Fechar painel multi-agente"
+              aria-label="Fechar painel de agentes"
               className="p-2 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-all cursor-pointer"
             >
               <X className="w-4 h-4" />
@@ -594,116 +700,75 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
           </div>
         </div>
 
-        {/* Conteúdo rolável */}
+        {/* Barra Compacta de Governança (Budget + Segurança em 1 linha) */}
+        <div className="px-6 py-2.5 border-b border-white/8 bg-[#040916] flex items-center justify-between gap-3 flex-wrap text-[10px] font-mono">
+          <div className="flex items-center gap-3">
+            <span className="inline-flex items-center gap-1.5 text-slate-300">
+              <Gauge className="w-3.5 h-3.5 text-cyan-400" />
+              US$ {budget.daily_usd_used.toFixed(4)} / {budget.max_usd_per_day.toFixed(2)} ({usdPct.toFixed(0)}%)
+            </span>
+            <span className="inline-flex items-center gap-1 text-cyan-300">
+              <Cpu className="w-3 h-3" />
+              Ativos: {budget.active_concurrent}/{budget.max_concurrent_agents}
+            </span>
+          </div>
+          <span className="inline-flex items-center gap-1 text-emerald-300/90">
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+            {pendingApprovals.length === 0
+              ? "Tier 3 Limpo · Curadoria Humana Ativa"
+              : `${pendingApprovals.length} Aprovação(ões) Tier 3 Pendente(s)`}
+          </span>
+        </div>
+
+        {/* Corpo Rolável */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
-          {/* Alertas / Feedback */}
           {error && (
-            <div className="rounded-2xl bg-red-500/10 border border-red-400/35 px-4 py-3 text-xs text-red-200 flex items-start gap-2.5">
+            <div className="rounded-xl bg-red-500/12 border border-red-400/35 px-4 py-3 text-xs text-red-200 flex items-start gap-2.5">
               <ShieldAlert className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
               <span>{error}</span>
             </div>
           )}
 
           {bannerMsg && (
-            <div className="rounded-2xl bg-cyan-500/10 border border-cyan-400/35 px-4 py-3 text-xs text-cyan-100 flex items-start gap-2.5">
-              <Sparkles className="w-4 h-4 text-cyan-300 shrink-0 mt-0.5" />
+            <div className="rounded-xl bg-emerald-500/12 border border-emerald-400/35 px-4 py-3 text-xs text-emerald-100 flex items-start gap-2.5">
+              <Sparkles className="w-4 h-4 text-emerald-300 shrink-0 mt-0.5" />
               <span>{bannerMsg}</span>
             </div>
           )}
 
-          {/* 1. Daily Budget Guard */}
-          <section className="rounded-2xl border border-cyan-400/20 bg-white/[0.03] p-4 space-y-3">
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <div className="flex items-center gap-2">
-                <Gauge className="w-4 h-4 text-cyan-300" />
-                <h3 className="text-[11px] font-mono uppercase tracking-[0.2em] text-cyan-200 font-semibold">
-                  Budget Guard Diário
-                </h3>
+          {/* Aprovações Tier 3 — Só expande quando realmente houver pendência! */}
+          {pendingApprovals.length > 0 && (
+            <section className="rounded-2xl border border-amber-400/40 bg-amber-500/[0.06] p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert className="w-4 h-4 text-amber-300" />
+                  <h3 className="text-[11px] font-mono uppercase tracking-[0.18em] text-amber-200 font-semibold">
+                    Aprovações Tier 3 Pendentes ({pendingApprovals.length})
+                  </h3>
+                </div>
               </div>
 
-              <div className="flex items-center gap-2">
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-mono bg-cyan-500/15 border border-cyan-400/30 text-cyan-200">
-                  <Cpu className="w-3 h-3 text-cyan-300" />
-                  Concorrência: {budget.active_concurrent}/{budget.max_concurrent_agents}
-                </span>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-white/5 border border-white/10 text-slate-300">
-                  Hop ≤ {budget.max_hop_count}
-                </span>
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <div className="flex items-baseline justify-between text-xs font-mono">
-                <span className="text-slate-300">
-                  US$ {budget.daily_usd_used.toFixed(4)}{" "}
-                  <span className="text-slate-500">/ US$ {budget.max_usd_per_day.toFixed(2)}</span>
-                </span>
-                <span className="text-cyan-300">
-                  {budget.daily_tokens_used.toLocaleString("pt-BR")} tokens ({usdPct.toFixed(1)}%)
-                </span>
-              </div>
-              <div className="h-2 w-full rounded-full bg-black/60 border border-white/10 overflow-hidden">
-                <div
-                  className={`h-full rounded-full bg-gradient-to-r ${budgetBarColor} transition-all duration-500`}
-                  style={{ width: `${usdPct}%` }}
-                />
-              </div>
-            </div>
-          </section>
-
-          {/* 2. Fila de Aprovações Tier 3 (Human-in-the-Loop) */}
-          <section className="rounded-2xl border border-amber-400/25 bg-amber-500/[0.04] p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <ShieldAlert className="w-4 h-4 text-amber-300" />
-                <h3 className="text-[11px] font-mono uppercase tracking-[0.2em] text-amber-200 font-semibold">
-                  Aprovações Tier 3 Pendentes
-                </h3>
-              </div>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-amber-500/20 border border-amber-400/40 text-amber-200">
-                {pendingApprovals.length} pendente(s)
-              </span>
-            </div>
-
-            {pendingApprovals.length === 0 ? (
-              <div className="rounded-xl border border-white/8 bg-black/30 px-3.5 py-3 text-xs text-slate-400 flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>Nenhuma ação crítica Tier 3 aguardando confirmação humana no momento.</span>
-              </div>
-            ) : (
               <div className="space-y-2.5">
                 {pendingApprovals.map((item) => {
                   const busy = Boolean(busyApprovalIds[item.approval_id]);
                   return (
                     <div
                       key={item.approval_id}
-                      className="rounded-xl border border-amber-400/35 bg-[#071022]/90 p-3.5 space-y-2.5"
+                      className="rounded-xl border border-amber-400/35 bg-[#071022]/95 p-3.5 space-y-2.5"
                     >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="space-y-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-xs font-bold font-mono text-white">
-                              {item.tool}
-                            </span>
-                            <span className="px-2 py-0.5 rounded-full text-[9px] font-mono uppercase bg-red-500/20 border border-red-400/40 text-red-200">
-                              Tier {item.tier}
-                            </span>
-                            {item.context_tainted && (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-mono uppercase bg-amber-500/25 border border-amber-400/50 text-amber-200">
-                                <AlertTriangle className="w-2.5 h-2.5" />
-                                Tainted Context
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-[11px] text-slate-300 leading-relaxed">
-                            {item.reason}
-                          </p>
-                          <p className="text-[10px] font-mono text-slate-500 break-all">
-                            Agente: {item.agent} · Args: {item.args_summary}
-                          </p>
-                        </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-bold font-mono text-white">{item.tool}</span>
+                        <span className="px-2 py-0.5 rounded-full text-[9px] font-mono uppercase bg-red-500/20 border border-red-400/40 text-red-200">
+                          Tier {item.tier}
+                        </span>
+                        {item.context_tainted && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-mono uppercase bg-amber-500/25 border border-amber-400/50 text-amber-200">
+                            <AlertTriangle className="w-2.5 h-2.5" />
+                            Contexto Externo
+                          </span>
+                        )}
                       </div>
-
+                      <p className="text-[11px] text-slate-300 leading-relaxed">{item.reason}</p>
                       <div className="flex items-center justify-end gap-2 pt-1">
                         <button
                           type="button"
@@ -732,23 +797,11 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
                   );
                 })}
               </div>
-            )}
-          </section>
+            </section>
+          )}
 
-          {/* 3. Perfis Especialistas Hermes & Delegação Rápida */}
+          {/* 1. Seleção dos 4 Agentes + Delegação Imediata */}
           <section className="rounded-2xl border border-white/10 bg-white/[0.025] p-4 space-y-3.5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Zap className="w-4 h-4 text-cyan-300" />
-                <h3 className="text-[11px] font-mono uppercase tracking-[0.2em] text-cyan-200 font-semibold">
-                  Perfis Especialistas Hermes
-                </h3>
-              </div>
-              <span className="text-[10px] font-mono text-slate-400">
-                {profiles.length} perfis isolados (~/.hermes)
-              </span>
-            </div>
-
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {profiles.map((prof) => {
                 const meta = getProfileMeta(prof.name);
@@ -761,8 +814,8 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
                     onClick={() => setSelectedProfile(prof.name)}
                     className={`text-left rounded-xl p-3 border transition-all cursor-pointer ${
                       isSelected
-                        ? "border-cyan-400/60 bg-cyan-500/12 shadow-[0_0_20px_rgba(34,211,238,0.16)]"
-                        : "border-white/10 bg-black/35 hover:border-cyan-400/30 hover:bg-white/[0.04]"
+                        ? meta.selectedBorder
+                        : "border-white/10 bg-black/35 hover:border-white/25 hover:bg-white/[0.04]"
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2 mb-1">
@@ -771,35 +824,47 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
                         {prof.label}
                       </span>
                       <span className="text-[9px] font-mono text-slate-400">
-                        ≤ {prof.default_max_steps} steps
+                        ≤ {prof.default_max_steps} passos
                       </span>
                     </div>
-                    <p className="text-[11px] text-slate-400 leading-snug line-clamp-2">
+                    <p className="text-[11px] text-slate-300/90 leading-snug line-clamp-2">
                       {prof.mission}
-                    </p>
-                    <p className="text-[9px] font-mono text-slate-500 mt-1.5 truncate">
-                      Sandbox: {prof.sandbox}
                     </p>
                   </button>
                 );
               })}
             </div>
 
-            {/* Formulário de delegação assíncrona */}
+            {/* Sugestões rápidas contextualizadas por agente */}
+            <div className="flex flex-wrap gap-1.5 pt-0.5">
+              {suggestions.map((sug, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => setTaskInput(sug)}
+                  className="px-2.5 py-1 rounded-lg bg-white/[0.04] hover:bg-cyan-500/12 border border-white/8 hover:border-cyan-400/35 text-[10.5px] text-slate-300 hover:text-cyan-200 transition-colors cursor-pointer"
+                >
+                  {sug}
+                </button>
+              ))}
+            </div>
+
             <form onSubmit={handleDelegate} className="space-y-2.5 pt-1">
               <div className="flex gap-2">
                 <input
                   type="text"
                   value={taskInput}
                   onChange={(e) => setTaskInput(e.target.value)}
-                  placeholder={`Delegar missão assíncrona para '${selectedProfile}'...`}
+                  placeholder={`Descreva a missão para '${
+                    profiles.find((p) => p.name === selectedProfile)?.label ?? selectedProfile
+                  }'...`}
                   disabled={submitting}
                   className="flex-1 rounded-xl bg-black/65 border border-white/12 focus:border-cyan-400/60 px-3.5 py-2.5 text-xs text-white placeholder-slate-500 outline-none transition-all"
                 />
                 <button
                   type="submit"
                   disabled={!taskInput.trim() || submitting}
-                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-400 to-blue-500 hover:from-cyan-300 hover:to-blue-400 text-slate-950 font-bold text-[11px] uppercase tracking-wider shadow-[0_0_20px_rgba(34,211,238,0.28)] transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-bold text-[11px] uppercase tracking-wider transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {submitting ? (
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -818,33 +883,31 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
                   className="rounded border-white/20 bg-black/60 accent-amber-400"
                 />
                 <span>
-                  Marcar como contexto externo não confiável (ativa Taint-Tracking → aprovação Tier 3)
+                  Contexto externo não confiável (exige confirmação humana Tier 3 antes de executar)
                 </span>
               </label>
             </form>
           </section>
 
-          {/* 4. Cards de Missões Assíncronas */}
+          {/* 2. Resultados & Curadoria para a Base de Conhecimento */}
           <section className="space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Activity className="w-4 h-4 text-cyan-300" />
-                <h3 className="text-[11px] font-mono uppercase tracking-[0.2em] text-cyan-200 font-semibold">
-                  Missões Assíncronas ({jobs.length})
+                <h3 className="text-[11px] font-mono uppercase tracking-[0.18em] text-cyan-200 font-semibold">
+                  Missões & Curadoria ({jobs.length})
                 </h3>
               </div>
-              <span className="text-[10px] font-mono text-slate-500">
-                Atualização automática · 3s
-              </span>
+              <span className="text-[10px] font-mono text-slate-500">Tempo real · 3s</span>
             </div>
 
             {jobs.length === 0 ? (
-              <div className="rounded-2xl border border-white/8 bg-white/[0.02] px-4 py-6 text-center text-xs text-slate-500">
-                Nenhuma missão delegada ainda. Selecione um perfil Hermes acima para iniciar uma
-                tarefa em segundo plano.
+              <div className="rounded-2xl border border-white/8 bg-white/[0.02] px-4 py-7 text-center text-xs text-slate-400">
+                Nenhuma missão na fila. Escolha um dos 4 agentes acima para pesquisar, organizar
+                dados, gerar ideias para a F.R.Y.I.Vs ou auditar a engenharia.
               </div>
             ) : (
-              <div className="space-y-2.5">
+              <div className="space-y-3">
                 {jobs.map((job) => {
                   const profileMeta = getProfileMeta(job.profile);
                   const ProfileIcon = profileMeta.icon;
@@ -854,11 +917,19 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
                     job.status === "running" ||
                     job.status === "awaiting_approval";
                   const cancelling = Boolean(busyJobIds[job.job_id]);
+                  const indexing = Boolean(indexingJobIds[job.job_id]);
+                  const discarding = Boolean(discardingJobIds[job.job_id]);
+                  const isExpanded = Boolean(expandedJobIds[job.job_id]);
+                  const isIndexed = job.kb_status === "indexed";
 
                   return (
                     <div
                       key={job.job_id}
-                      className="rounded-2xl border border-white/10 bg-[#071022]/85 p-4 space-y-2.5 hover:border-cyan-400/25 transition-colors"
+                      className={`rounded-2xl border p-4 space-y-3 transition-colors ${
+                        isIndexed
+                          ? "border-emerald-400/35 bg-[#061522]/90"
+                          : "border-white/10 bg-[#071022]/88 hover:border-cyan-400/25"
+                      }`}
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex items-center gap-2 flex-wrap">
@@ -880,6 +951,11 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
                           <span className="text-[10px] font-mono text-slate-500">
                             #{job.job_id.slice(0, 8)}
                           </span>
+                          {job.transport === "native_fryivs" && (
+                            <span className="px-2 py-0.5 rounded-full text-[9px] font-mono uppercase bg-cyan-500/12 border border-cyan-400/30 text-cyan-300">
+                              Motor Nativo
+                            </span>
+                          )}
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0">
@@ -905,9 +981,9 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
                         </div>
                       </div>
 
-                      <p className="text-xs text-slate-200 leading-relaxed">{job.task}</p>
+                      <p className="text-xs font-medium text-white leading-relaxed">{job.task}</p>
 
-                      {/* Barra de progresso + métricas */}
+                      {/* Barra de progresso */}
                       <div className="space-y-1">
                         <div className="flex items-center justify-between text-[10px] font-mono text-slate-400">
                           <span>
@@ -925,22 +1001,111 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
                                 ? "bg-red-500"
                                 : job.status === "completed"
                                   ? "bg-emerald-400"
-                                  : "bg-gradient-to-r from-cyan-400 to-blue-500"
+                                  : "bg-cyan-400"
                             }`}
                             style={{ width: `${Math.min(100, Math.max(0, job.progress_pct))}%` }}
                           />
                         </div>
                       </div>
 
+                      {/* Relatório formatado + Ações de Curadoria (Indexar ou Descartar) */}
                       {job.result && (
-                        <div className="rounded-xl bg-emerald-500/8 border border-emerald-400/20 px-3 py-2 text-[11px] text-emerald-100/90 whitespace-pre-wrap line-clamp-4">
-                          {job.result}
+                        <div className="space-y-2.5">
+                          <div
+                            className={`rounded-xl bg-[#040a16] border border-white/10 px-3.5 py-3 text-xs text-slate-200 overflow-y-auto transition-all ${
+                              isExpanded ? "max-h-[420px]" : "max-h-52"
+                            }`}
+                          >
+                            <FormattedText content={job.result} compact />
+                          </div>
+
+                          <div className="flex items-center justify-between gap-2 flex-wrap pt-0.5">
+                            {job.result.length > 360 ? (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setExpandedJobIds((prev) => ({
+                                    ...prev,
+                                    [job.job_id]: !isExpanded,
+                                  }))
+                                }
+                                className="inline-flex items-center gap-1 text-[11px] font-mono text-cyan-300 hover:text-cyan-200 cursor-pointer"
+                              >
+                                {isExpanded ? (
+                                  <>
+                                    <ChevronUp className="w-3.5 h-3.5" /> Recolher leitura
+                                  </>
+                                ) : (
+                                  <>
+                                    <ChevronDown className="w-3.5 h-3.5" /> Expandir relatório completo
+                                  </>
+                                )}
+                              </button>
+                            ) : (
+                              <span />
+                            )}
+
+                            {job.status === "completed" && (
+                              <div className="flex items-center gap-2 ml-auto">
+                                {isIndexed ? (
+                                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/18 border border-emerald-400/45 text-emerald-200 text-[11px] font-semibold">
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                                    Indexado na Base ({job.kb_chunks || 1} chunks)
+                                  </span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    disabled={indexing || discarding}
+                                    onClick={() => void handleIndexJobToKB(job)}
+                                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-500/22 hover:bg-emerald-500/32 border border-emerald-400/50 text-emerald-100 text-[11px] font-semibold transition-all cursor-pointer disabled:opacity-50"
+                                  >
+                                    {indexing ? (
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-300" />
+                                    ) : (
+                                      <BookPlus className="w-3.5 h-3.5 text-emerald-300" />
+                                    )}
+                                    Indexar na Base de Conhecimento
+                                  </button>
+                                )}
+
+                                <button
+                                  type="button"
+                                  disabled={indexing || discarding}
+                                  onClick={() => void handleDiscardJob(job.job_id)}
+                                  title={
+                                    isIndexed
+                                      ? "Limpar este card da visualização (mantém o documento já indexado)"
+                                      : "Descartar resultado sem salvar na Base de Conhecimento"
+                                  }
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/[0.04] hover:bg-red-500/18 border border-white/12 hover:border-red-400/40 text-slate-300 hover:text-red-200 text-[11px] font-medium transition-all cursor-pointer disabled:opacity-50"
+                                >
+                                  {discarding ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  )}
+                                  Descartar
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       )}
 
                       {job.error && (
-                        <div className="rounded-xl bg-red-500/8 border border-red-400/25 px-3 py-2 text-[11px] text-red-200/90">
-                          {job.error}
+                        <div className="flex items-center justify-between gap-2 rounded-xl bg-red-500/10 border border-red-400/25 px-3 py-2 text-[11px] text-red-200/95">
+                          <span>{job.error}</span>
+                          {!isActive && (
+                            <button
+                              type="button"
+                              disabled={discarding}
+                              onClick={() => void handleDiscardJob(job.job_id)}
+                              className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/5 hover:bg-red-500/20 border border-white/10 text-[10px] text-slate-200 cursor-pointer"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              Descartar
+                            </button>
+                          )}
                         </div>
                       )}
                     </div>

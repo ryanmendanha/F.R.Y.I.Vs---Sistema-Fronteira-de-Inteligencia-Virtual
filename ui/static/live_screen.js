@@ -215,11 +215,21 @@
   miniPill.innerHTML = `<span class="fry-mini-dot"></span>AO VIVO · MINIMIZADO`;
   document.body.appendChild(miniPill);
 
-  /* ── Botão inicial de abertura ── */
+  /* ── Botão inicial de abertura (controlado pelo CommandRail React) ── */
   const toggle = document.createElement("button");
   toggle.id = "fry-live-toggle";
+  toggle.style.display = "none";
   toggle.innerHTML = `◉ TELA AO VIVO`;
   document.body.appendChild(toggle);
+
+  function getStreamUrl() {
+    let token = "";
+    try {
+      token = sessionStorage.getItem("fryivs_e2ee_session_token") || "";
+    } catch (e) {}
+    const qs = token ? `&e2ee_token=${encodeURIComponent(token)}` : "";
+    return "/api/screen/stream?fps=6&t=" + Date.now() + qs;
+  }
 
   /* ── Referências ── */
   const img   = panel.querySelector("#fry-live-img");
@@ -229,12 +239,12 @@
   let aberto     = false;
   let minimizado = false;
 
-  /* ── Posições de acoplamento ── */
+  /* ── Posições de acoplamento (respeitando CommandRail de 62px à esquerda) ── */
   const DOCK = {
-    bl: () => ({ bottom: "24px", left: "24px",   top: "auto", right: "auto" }),
+    bl: () => ({ bottom: "24px", left: "84px",   top: "auto", right: "auto" }),
     br: () => ({ bottom: "24px", right: "24px",  top: "auto", left: "auto"  }),
-    tl: () => ({ top: "80px",   left: "24px",   bottom: "auto", right: "auto" }),
-    tr: () => ({ top: "80px",   right: "24px",  bottom: "auto", left: "auto"  }),
+    tl: () => ({ top: "76px",   left: "84px",   bottom: "auto", right: "auto" }),
+    tr: () => ({ top: "76px",   right: "24px",  bottom: "auto", left: "auto"  }),
   };
   function aplicarDock(pos) {
     const s = panel.style;
@@ -247,6 +257,14 @@
   // Posição padrão: inferior esquerdo
   aplicarDock(DOCK.bl);
 
+  function notifyState() {
+    window.dispatchEvent(
+      new CustomEvent("fryvis-live-screen-change", {
+        detail: { active: aberto && !minimizado, open: aberto, minimized: minimizado },
+      }),
+    );
+  }
+
   /* ── Abrir ── */
   async function abrir() {
     aberto = true;
@@ -254,6 +272,7 @@
     panel.classList.remove("fry-hidden");
     miniPill.style.display  = "none";
     toggle.style.display    = "none";
+    notifyState();
     try {
       const r = await fetch("/api/screen/status");
       const s = await r.json();
@@ -265,7 +284,7 @@
       }
     } catch (e) { /* tenta o stream mesmo assim */ }
     msg.style.display = "none";
-    img.src = "/api/screen/stream?fps=6&t=" + Date.now();
+    img.src = getStreamUrl();
     dot.classList.remove("off");
   }
 
@@ -276,8 +295,9 @@
     img.removeAttribute("src");
     panel.classList.add("fry-hidden");
     miniPill.style.display = "none";
-    toggle.style.display   = "";
+    toggle.style.display   = "none";
     dot.classList.add("off");
+    notifyState();
   }
 
   /* ── Minimizar (pílula) ── */
@@ -288,6 +308,7 @@
     panel.classList.add("fry-hidden");
     miniPill.style.display = "flex";
     dot.classList.add("off");
+    notifyState();
   }
 
   /* ── Restaurar da pílula ── */
@@ -295,11 +316,22 @@
     minimizado = false;
     miniPill.style.display = "none";
     panel.classList.remove("fry-hidden");
-    // Re-inicia o stream
     msg.style.display = "none";
-    img.src = "/api/screen/stream?fps=6&t=" + Date.now();
+    img.src = getStreamUrl();
     dot.classList.remove("off");
+    notifyState();
   }
+
+  window.__fryvisLiveScreen = {
+    open: abrir,
+    close: fechar,
+    toggle: () => {
+      if (aberto && !minimizado) fechar();
+      else if (minimizado) restaurar();
+      else abrir();
+    },
+    isActive: () => aberto && !minimizado,
+  };
 
   /* ── Eventos dos botões ── */
   toggle.onclick = abrir;

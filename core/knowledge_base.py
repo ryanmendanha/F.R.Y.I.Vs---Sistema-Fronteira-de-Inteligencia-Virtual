@@ -21,6 +21,7 @@ import sys
 import threading
 import unicodedata
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,7 @@ from core.memory_v3 import (
     TRUST_VERIFIED_INTERNAL,
     sanitizar_conteudo_externo,
 )
+from core.policy_engine import redact_secrets
 
 _RAIZ_FRYIVS = Path(__file__).resolve().parent.parent
 BASE_CONHECIMENTO_PATH: Path = (
@@ -659,6 +661,152 @@ def buscar_conhecimento(
     except Exception as e:
         print(f"[KnowledgeBase] Erro na busca: {e}")
         return ""
+
+
+def _slugify_kb_name(texto: str, max_len: int = 48) -> str:
+    nfkd = unicodedata.normalize("NFKD", texto or "")
+    ascii_str = "".join(ch for ch in nfkd if not unicodedata.combining(ch)).lower()
+    slug = re.sub(r"[^a-z0-9]+", "_", ascii_str).strip("_")
+    return (slug[:max_len].rstrip("_")) or "pesquisa"
+
+
+def indexar_pesquisa_agente(
+    *,
+    job_id: str,
+    profile: str,
+    task: str,
+    content: str,
+    titulo: str | None = None,
+    tags: list[str] | None = None,
+    base_dir: Path | None = None,
+) -> dict[str, Any]:
+    if not content or not content.strip():
+        raise ValueError("Conteúdo da pesquisa não pode ser vazio para indexação.")
+
+    raiz_kb = base_dir or BASE_CONHECIMENTO_PATH
+    pasta_curados = raiz_kb / "agentes_curados"
+    pasta_curados.mkdir(parents=True, exist_ok=True)
+
+    clean_profile = re.sub(r"[^a-z0-9_-]", "", (profile or "pesquisador").lower()) or "pesquisador"
+    clean_title = (titulo or task or "Pesquisa Curada").strip()[:120]
+    clean_title = str(redact_secrets(clean_title))
+    safe_body = str(redact_secrets(content.strip()))
+    safe_body, injection_flags = sanitizar_conteudo_externo(safe_body, aplicar_tag=False)
+
+    trust_level = (
+        TRUST_EXTERNAL_SANITIZED
+        if clean_profile in ("pesquisador", "ideias")
+        else TRUST_VERIFIED_INTERNAL
+    )
+    sanitized_flag = "true" if trust_level != TRUST_VERIFIED_INTERNAL else "false"
+
+    now_utc = datetime.now(timezone.utc)
+    ts_str = now_utc.strftime("%Y%m%d_%H%M%S")
+    short_job = re.sub(r"[^a-z0-9]", "", (job_id or "").lower())[:8] or "manual"
+    slug = _slugify_kb_name(clean_title)
+    filename = f"{ts_str}_{clean_profile}_{short_job}_{slug}.md"
+    file_path = pasta_curados / filename
+    rel_str = file_path.relative_to(raiz_kb).as_posix()
+
+    tag_items = [clean_profile, "curado_usuario", *(tags or [])]
+    tags_csv = ", ".join(dict.fromkeys(t.strip() for t in tag_items if t and t.strip()))
+
+    markdown_doc = (
+        f"---\n"
+        f"titulo: {clean_title.replace(':', ' -')}\n"
+        f"habilidade: agente_{clean_profile}\n"
+        f"tags: {tags_csv}\n"
+        f"agente: {clean_profile}\n"
+        f"job_id: {job_id}\n"
+        f"trust_level: {trust_level}\n"
+        f"curado_em: {now_utc.isoformat()}\n"
+        f"---\n\n"
+        f"# {clean_title}\n\n"
+        f"## Missao Original\n{str(redact_secrets(task.strip()))}\n\n"
+        f"## Sintese Curada\n{safe_body}\n"
+    )
+    file_path.write_text(markdown_doc, encoding="utf-8")
+    sha256_atual = hashlib.sha256(markdown_doc.encode("utf-8")).hexdigest()
+
+    _, corpo = _ler_frontmatter(markdown_doc)
+    ids: list[str] = []
+    docs: list[str] = []
+    metas: list[dict[str, str]] = []
+
+    for sec_titulo, sec_conteudo in _dividir_em_secoes(corpo):
+        for i, pedaco in enumerate(_quebrar_texto(sec_conteudo, _TAMANHO_MAX_CHUNK, _SOBREPOSICAO)):
+            chave = f"{rel_str}::{sec_titulo}::{i}"
+            chunk_id = hashlib.md5(chave.encode("utf-8")).hexdigest()
+            doc_text = f"[agente_{clean_profile} | {file_path.stem} | {sec_titulo}]\n{pedaco}"
+            ids.append(chunk_id)
+            docs.append(doc_text)
+            metas.append({
+                "categoria": "agentes_curados",
+                "habilidade": f"agente_{clean_profile}",
+                "arquivo": rel_str,
+                "secao": sec_titulo,
+                "tags": tags_csv,
+                "trust_level": trust_level,
+                "sanitized": sanitized_flag,
+                "injection_flags": ",".join(injection_flags),
+                "job_id": str(job_id),
+            })
+
+    colecao = _get_colecao()
+    if ids:
+        colecao.upsert(ids=ids, documents=docs, metadatas=metas)
+
+    if base_dir is None:
+        manifesto = _ler_manifesto()
+        manifesto[rel_str] = sha256_atual
+        _salvar_manifesto(manifesto)
+
+    _invalidar_cache_bm25()
+
+    try:
+        total_collection = int(colecao.count())
+    except Exception:
+        total_collection = len(ids)
+
+    return {
+        "indexed": True,
+        "arquivo": rel_str,
+        "titulo": clean_title,
+        "chunks_indexados": len(ids),
+        "total_chunks_base": total_collection,
+        "trust_level": trust_level,
+    }
+
+
+def listar_documentos_conhecimento(limit: int = 40) -> list[dict[str, Any]]:
+    arquivos = _listar_arquivos()
+    itens: list[dict[str, Any]] = []
+    for arq in arquivos:
+        try:
+            st = arq.stat()
+            rel = arq.relative_to(BASE_CONHECIMENTO_PATH)
+            rel_str = rel.as_posix()
+            partes = rel.parts
+            categoria = partes[0] if len(partes) > 1 else "geral"
+            head_txt = arq.read_text(encoding="utf-8", errors="replace")[:1200]
+            meta, _ = _ler_frontmatter(head_txt)
+            itens.append({
+                "arquivo": rel_str,
+                "nome": meta.get("titulo") or arq.stem.replace("_", " "),
+                "categoria": categoria,
+                "habilidade": meta.get("habilidade", ""),
+                "tags": meta.get("tags", ""),
+                "agente": meta.get("agente", ""),
+                "curado_por_agente": categoria == "agentes_curados" or bool(meta.get("agente")),
+                "trust_level": meta.get("trust_level", TRUST_VERIFIED_INTERNAL),
+                "tamanho_bytes": st.st_size,
+                "atualizado_em": st.st_mtime,
+            })
+        except Exception:
+            continue
+
+    itens.sort(key=lambda x: float(x.get("atualizado_em", 0.0)), reverse=True)
+    return itens[: max(1, int(limit))]
 
 
 def status() -> dict[str, Any]:

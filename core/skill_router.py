@@ -340,11 +340,11 @@ SKILL_SEMANTIC_PROFILES: Final[dict[str, dict[str, str]]] = {
         )
     },
     "delegar_missao_hermes": {
-        "description": "Delega uma missão longa ou especializada em segundo plano para um subagente Hermes Agent (pesquisador, engenheiro, analista ou sentinela).",
+        "description": "Delega uma missão longa ou especializada em segundo plano para um subagente especialista (pesquisador, organizador, ideias ou engenheiro).",
         "intents": (
-            "delegar missao hermes delegar tarefa para agente acionar subagente hermes "
-            "mandar agente pesquisador engenheiro analista sentinela executar em segundo plano "
-            "orquestrar subagente delegate hermes mission"
+            "delegar missao hermes delegar tarefa para agente acionar subagente "
+            "mandar agente pesquisador organizador de dados ideias engenheiro executar em segundo plano "
+            "orquestrar subagente delegate agent mission"
         )
     },
     "consultar_status_agentes": {
