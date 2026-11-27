@@ -514,6 +514,8 @@ def transcribe_audio_gemini(audio_bytes: bytes, mime_type: str = "audio/webm") -
                         "text": (
                             "Transcreva fielmente apenas a fala em português contida neste áudio, "
                             "sem adicionar explicações, aspas ou comentários. "
+                            "A assistente se chama FRYIVS (pronuncia-se 'Frayvis'); quando ouvir "
+                            "'Frayvis', 'Fraives', 'Frives', 'Prays' ou similar no início da fala, escreva 'FRYIVS'. "
                             "Se houver apenas silêncio ou ruído sem fala inteligível, retorne apenas vazio."
                         )
                     },

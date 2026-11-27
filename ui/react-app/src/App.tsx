@@ -22,6 +22,8 @@ import {
 } from "@/lib/e2ee";
 import {
   BrowserClapMonitor,
+  BrowserWakeWordListener,
+  isWakeWordSupported,
   isBrowserRecording,
   recordBrowserUtterance,
   stopActiveBrowserRecording,
@@ -133,6 +135,8 @@ export default function App() {
   const [clapFlash, setClapFlash] = useState<boolean>(false);
   const clapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clapMonitorRef = useRef<BrowserClapMonitor | null>(null);
+  const wakeListenerRef = useRef<BrowserWakeWordListener | null>(null);
+  const sendMessageTextRef = useRef<(t: string) => Promise<void>>(async () => {});
   const fileUploadInputRef = useRef<HTMLInputElement>(null);
   const [uploadingFile, setUploadingFile] = useState<boolean>(false);
   const isWebMode = status.runtime_mode === "web";
@@ -771,6 +775,8 @@ export default function App() {
     }
   };
 
+  sendMessageTextRef.current = sendMessageText;
+
   const handleSend = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     void sendMessageText(input);
@@ -934,7 +940,37 @@ export default function App() {
 
   useEffect(() => {
     clapMonitorRef.current?.setSuppressed(aiState !== "idle");
+    wakeListenerRef.current?.setSuppressed(aiState !== "idle");
   }, [aiState]);
+
+  // Wake word "FRYIVS" no navegador (modo Web): chamar pelo nome sem clicar
+  useEffect(() => {
+    const canListen =
+      isWebMode && !e2eeChecking && (!e2eeRequired || e2eeUnlocked) && !micMuted;
+    if (!canListen || !isWakeWordSupported()) {
+      wakeListenerRef.current?.stop();
+      wakeListenerRef.current = null;
+      if (isWebMode) setWakeWordActive(false);
+      return;
+    }
+    const listener = new BrowserWakeWordListener();
+    wakeListenerRef.current = listener;
+    const ok = listener.start((rest) => {
+      setClapFlash(true);
+      if (clapTimerRef.current) clearTimeout(clapTimerRef.current);
+      clapTimerRef.current = setTimeout(() => setClapFlash(false), 1600);
+      if (rest && rest.split(/\s+/).length >= 2) {
+        void sendMessageTextRef.current(rest);
+      } else {
+        void handleVoiceRef.current();
+      }
+    });
+    setWakeWordActive(ok);
+    return () => {
+      listener.stop();
+      if (wakeListenerRef.current === listener) wakeListenerRef.current = null;
+    };
+  }, [isWebMode, e2eeChecking, e2eeRequired, e2eeUnlocked, micMuted]);
 
   useEffect(() => {
     const canListenClaps =
@@ -1372,17 +1408,22 @@ export default function App() {
               <Icons8Icon name="applause" className="w-[18px] h-[18px]" />
             </button>
 
-            {(aiState === "thinking" || aiState === "speaking") && (
-              <button
-                type="button"
-                onClick={pararComandoAtivo}
-                title="Interromper resposta/execução atual"
-                aria-label="Parar comando atual"
-                className="w-10 h-10 rounded-full flex items-center justify-center bg-red-500/25 hover:bg-red-500/40 border border-red-400/45 text-red-200 transition-all cursor-pointer"
-              >
-                <Icons8Icon name="close" className="w-4 h-4" />
-              </button>
-            )}
+            {/* Botão Parar sempre reservado no layout (evita deslocar o dock e cliques acidentais) */}
+            <button
+              type="button"
+              onClick={pararComandoAtivo}
+              disabled={!(aiState === "thinking" || aiState === "speaking")}
+              tabIndex={aiState === "thinking" || aiState === "speaking" ? 0 : -1}
+              title="Interromper resposta/execução atual"
+              aria-label="Parar comando atual"
+              className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all ${
+                aiState === "thinking" || aiState === "speaking"
+                  ? "bg-red-500/25 hover:bg-red-500/40 border-red-400/45 text-red-200 cursor-pointer opacity-100"
+                  : "opacity-0 pointer-events-none border-transparent"
+              }`}
+            >
+              <Icons8Icon name="close" className="w-4 h-4" />
+            </button>
           </div>
 
           <div className="inline-flex items-center gap-1.5 text-[10px] font-mono text-slate-400">
@@ -1405,9 +1446,13 @@ export default function App() {
                 : micMuted
                   ? "Voz silenciada"
                   : isWebMode
-                    ? clapEnabled
-                      ? "Modo Web · clique no mic ou bata 2 palmas"
-                      : "Modo Web · clique no microfone para falar"
+                    ? wakeWordActive
+                      ? clapEnabled
+                        ? 'Escuta ativa · diga "FRYIVS" ou bata 2 palmas'
+                        : 'Escuta ativa · diga "FRYIVS"'
+                      : clapEnabled
+                        ? "Modo Web · clique no mic ou bata 2 palmas"
+                        : "Modo Web · clique no microfone para falar"
                     : wakeWordActive
                       ? clapEnabled
                         ? 'Escuta ativa · diga "FRYIVS" ou bata 2 palmas'

@@ -152,6 +152,108 @@ export async function recordBrowserUtterance(options?: {
   });
 }
 
+/**
+ * Wake word "FRYIVS" no navegador (Web Speech API contínua, pt-BR).
+ * Detecta o nome da IA e, se vier um comando junto ("Fryivs, que horas são?"),
+ * entrega o comando direto; se vier só o nome, pede para abrir a escuta.
+ */
+const WAKE_RE =
+  /\b(fr?[aey]?[iy]+v[iy]?e?s|fra[iy]+v[ei]?s|fryivs|fryvis|frives|fraives|frayvis|fraivis|prays|praise|frei\s?vis|fry\s?vis|fly\s?vis)\b/i;
+
+export function isWakeWordSupported(): boolean {
+  const w = window as unknown as Record<string, unknown>;
+  return Boolean(w.SpeechRecognition || w.webkitSpeechRecognition);
+}
+
+export class BrowserWakeWordListener {
+  private recog: any = null;
+  private running = false;
+  private suppressed = false;
+  private restartTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastFireAt = 0;
+
+  start(onWake: (commandAfterWake: string) => void): boolean {
+    const w = window as unknown as Record<string, any>;
+    const Ctor = w.SpeechRecognition || w.webkitSpeechRecognition;
+    if (!Ctor) return false;
+    this.running = true;
+    const recog = new Ctor();
+    recog.lang = "pt-BR";
+    recog.continuous = true;
+    recog.interimResults = false;
+    recog.maxAlternatives = 3;
+
+    recog.onresult = (ev: any) => {
+      if (this.suppressed) return;
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const res = ev.results[i];
+        if (!res.isFinal) continue;
+        for (let a = 0; a < res.length; a++) {
+          const txt: string = (res[a]?.transcript || "").trim();
+          const m = txt.match(WAKE_RE);
+          if (!m) continue;
+          const now = Date.now();
+          if (now - this.lastFireAt < 2500) return;
+          this.lastFireAt = now;
+          const rest = txt
+            .slice((m.index ?? 0) + m[0].length)
+            .replace(/^[\s,.!?:;-]+/, "")
+            .trim();
+          onWake(rest);
+          return;
+        }
+      }
+    };
+
+    const scheduleRestart = () => {
+      if (!this.running) return;
+      if (this.restartTimer) clearTimeout(this.restartTimer);
+      this.restartTimer = setTimeout(() => {
+        if (!this.running || this.suppressed) return;
+        try {
+          recog.start();
+        } catch {}
+      }, 400);
+    };
+    recog.onend = scheduleRestart;
+    recog.onerror = (e: any) => {
+      if (e?.error === "not-allowed" || e?.error === "service-not-allowed") {
+        this.running = false;
+      }
+    };
+
+    this.recog = recog;
+    try {
+      recog.start();
+    } catch {}
+    return true;
+  }
+
+  setSuppressed(value: boolean): void {
+    if (this.suppressed === value) return;
+    this.suppressed = value;
+    if (!this.recog) return;
+    if (value) {
+      try {
+        this.recog.abort();
+      } catch {}
+    } else if (this.running) {
+      try {
+        this.recog.start();
+      } catch {}
+    }
+  }
+
+  stop(): void {
+    this.running = false;
+    if (this.restartTimer) clearTimeout(this.restartTimer);
+    try {
+      this.recog?.abort();
+    } catch {}
+    this.recog = null;
+  }
+}
+
 export class BrowserClapMonitor {
   private stream: MediaStream | null = null;
   private ctx: AudioContext | null = null;
