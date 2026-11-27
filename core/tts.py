@@ -1,18 +1,25 @@
 """
-Módulo de Text-to-Speech para F.R.Y.I.Vs.
-Provider primário: OpenAI TTS (modelo tts-1) com voz configurável via .env.
-Fallback gratuito: Edge TTS (Microsoft) com voz natural em PT-BR.
-Garante que a IA SEMPRE fale, mesmo sem créditos na OpenAI.
+Módulo de Text-to-Speech Neural 2.0 para F.R.Y.I.Vs.
+- Voz principal: Microsoft Edge Neural TTS (fr-FR-VivienneMultilingualNeural) com prosódia ajustada.
+- Humanizador prosódico e fonético PT-BR (pausas naturais, siglas, moedas, código/links).
+- Streaming por sentenças de baixa latência para reprodução local quase instantânea.
+- Fallback offline nativo do Windows (OneCore / SAPI5) quando sem internet.
 """
 
+from __future__ import annotations
+
 import asyncio
+import concurrent.futures
+import hashlib
 import os
+import re
 import shutil
+import sys
 import threading
 import time
 import uuid
-from typing import Optional
-import re
+from typing import Callable, Optional
+
 import requests
 from dotenv import load_dotenv
 
@@ -29,19 +36,25 @@ DEFAULT_VOICE = "nova"
 TTS_MODEL = "tts-1"
 OPENAI_TTS_URL = "https://api.openai.com/v1/audio/speech"
 
-EDGE_TTS_VOICE = "pt-BR-FranciscaNeural"
-EDGE_TTS_VOICE_EN = "en-US-JennyNeural"
+EDGE_TTS_VOICE = "fr-FR-VivienneMultilingualNeural"
+EDGE_TTS_VOICE_EN = "fr-FR-VivienneMultilingualNeural"
+EDGE_TTS_RATE = "+4%"
+EDGE_TTS_PITCH = "+0Hz"
+EDGE_TTS_VOLUME = "+0%"
 
 _ENGLISH_PHRASE_REGEX = re.compile(
-    r'(Recursive\s+Yield\s+Female\s+Virtual(?:\s+Intelligence)?\s+system)',
-    re.IGNORECASE
+    r"(Recursive\s+Yield\s+Female\s+Virtual(?:\s+Intelligence)?\s+system)",
+    re.IGNORECASE,
 )
 
+from core.runtime_mode import get_audio_cache_dir
+
 _TTS_LOCK = threading.Lock()
-AUDIO_CACHE_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "audio_cache"
-)
+AUDIO_CACHE_DIR = str(get_audio_cache_dir())
+
+
+def _em_teste() -> bool:
+    return "pytest" in sys.modules or bool(os.environ.get("PYTEST_CURRENT_TEST"))
 
 
 def _safe_atomic_save(temp_path: str, target_path: str) -> bool:
@@ -140,7 +153,10 @@ def _falar_openai(texto: str, output_path: str) -> str:
             if response.status_code in (401, 429):
                 _openai_quota_exhausted = True
                 _openai_quota_exhausted_at = time.time()
-                print(f"[TTS] OpenAI quota/credencial inválida ({response.status_code}). Alternando para Edge TTS por {_OPENAI_CB_TTL:.0f}s.")
+                print(
+                    f"[TTS] OpenAI quota/credencial inválida ({response.status_code}). "
+                    f"Alternando para Edge TTS por {_OPENAI_CB_TTL:.0f}s."
+                )
             err = ""
             try:
                 err = response.json().get("error", {}).get("message", "")
@@ -163,12 +179,74 @@ def _falar_openai(texto: str, output_path: str) -> str:
                 pass
 
 
-def _falar_edge_tts(texto: str, output_path: str, use_cache: bool = True) -> str:
-    """Fallback gratuito: gera áudio via Edge TTS com gravação atômica, cache por hash e suporte bilíngue."""
-    import hashlib
+def _obter_parametros_edge() -> tuple[str, str, str, str, str]:
     voice = os.getenv("EDGE_TTS_VOICE", EDGE_TTS_VOICE).strip() or EDGE_TTS_VOICE
     voice_en = os.getenv("EDGE_TTS_VOICE_EN", EDGE_TTS_VOICE_EN).strip() or EDGE_TTS_VOICE_EN
-    cache_key = hashlib.sha1(f"{voice}|{voice_en}|{texto.strip()}".encode("utf-8")).hexdigest()[:16]
+    rate = os.getenv("EDGE_TTS_RATE", EDGE_TTS_RATE).strip() or EDGE_TTS_RATE
+    pitch = os.getenv("EDGE_TTS_PITCH", EDGE_TTS_PITCH).strip() or EDGE_TTS_PITCH
+    volume = os.getenv("EDGE_TTS_VOLUME", EDGE_TTS_VOLUME).strip() or EDGE_TTS_VOLUME
+    return voice, voice_en, rate, pitch, volume
+
+
+def _falar_windows_offline(texto: str, output_path: str) -> str:
+    """Fallback offline nativo usando vozes Windows OneCore / SAPI5 (ex: Microsoft Maria)."""
+    if sys.platform != "win32" or not texto.strip():
+        return ""
+    try:
+        import win32com.client
+
+        os.makedirs(AUDIO_CACHE_DIR, exist_ok=True)
+        base_root, _ = os.path.splitext(output_path)
+        wav_target = f"{base_root}.wav" if output_path.lower().endswith(".wav") else os.path.join(
+            AUDIO_CACHE_DIR, f"offline_{uuid.uuid4().hex[:10]}.wav"
+        )
+
+        sp_voice = win32com.client.Dispatch("SAPI.SpVoice")
+        chosen_tok = None
+        for cat_path in (
+            r"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Speech_OneCore\Voices",
+            r"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Speech\Voices",
+        ):
+            try:
+                cat = win32com.client.Dispatch("SAPI.SpObjectTokenCategory")
+                cat.SetId(cat_path, False)
+                tokens = cat.EnumerateTokens()
+                for i in range(tokens.Count):
+                    tok = tokens.Item(i)
+                    desc = (tok.GetDescription() or "").lower()
+                    if "maria" in desc or "portuguese" in desc or "brasil" in desc or "brazil" in desc:
+                        chosen_tok = tok
+                        break
+                if chosen_tok is not None:
+                    break
+            except Exception:
+                continue
+
+        if chosen_tok is not None:
+            sp_voice.Voice = chosen_tok
+        sp_voice.Rate = 1
+        stream = win32com.client.Dispatch("SAPI.SpFileStream")
+        stream.Open(wav_target, 3, False)
+        try:
+            sp_voice.AudioOutputStream = stream
+            sp_voice.Speak(texto.strip())
+        finally:
+            stream.Close()
+
+        if os.path.exists(wav_target) and os.path.getsize(wav_target) > 200:
+            print(f"[TTS-Offline] Áudio sintetizado localmente via Windows OneCore -> {wav_target}")
+            return wav_target
+    except Exception as exc:
+        print(f"[TTS-Offline] Falha no fallback offline Windows: {exc}")
+    return ""
+
+
+def _falar_edge_tts(texto: str, output_path: str, use_cache: bool = True) -> str:
+    """Gera áudio via Microsoft Edge Neural TTS com prosódia ajustada, cache SHA-1 e gravação atômica."""
+    voice, voice_en, rate, pitch, volume = _obter_parametros_edge()
+    cache_key = hashlib.sha1(
+        f"{voice}|{voice_en}|{rate}|{pitch}|{volume}|{texto.strip()}".encode("utf-8")
+    ).hexdigest()[:16]
     os.makedirs(AUDIO_CACHE_DIR, exist_ok=True)
     cached_mp3 = os.path.join(AUDIO_CACHE_DIR, f"tts_{cache_key}.mp3")
 
@@ -199,23 +277,27 @@ def _falar_edge_tts(texto: str, output_path: str, use_cache: bool = True) -> str
         async def _fetch(chunk_text: str, chunk_voice: str) -> bytes:
             if not chunk_text or not chunk_text.strip():
                 return b""
-            c = edge_tts.Communicate(chunk_text.strip(), chunk_voice)
+            c = edge_tts.Communicate(
+                chunk_text.strip(), chunk_voice, rate=rate, pitch=pitch, volume=volume
+            )
             data = b""
             async for chunk in c.stream():
                 if chunk["type"] == "audio":
                     data += chunk["data"]
             return data
 
-        async def _generate():
-            match = _ENGLISH_PHRASE_REGEX.search(texto)
+        async def _generate() -> None:
+            match = None if voice == voice_en else _ENGLISH_PHRASE_REGEX.search(texto)
             if not match:
-                communicate = edge_tts.Communicate(texto.strip(), voice)
+                communicate = edge_tts.Communicate(
+                    texto.strip(), voice, rate=rate, pitch=pitch, volume=volume
+                )
                 await communicate.save(temp_path)
                 return
 
-            prefix = texto[:match.start()].strip()
+            prefix = texto[: match.start()].strip()
             english_text = match.group(1).strip()
-            suffix = texto[match.end():].strip()
+            suffix = texto[match.end() :].strip()
 
             tasks = []
             if prefix:
@@ -229,7 +311,6 @@ def _falar_edge_tts(texto: str, output_path: str, use_cache: bool = True) -> str
             with open(temp_path, "wb") as f:
                 f.write(combined_audio)
 
-        import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(asyncio.run, _generate())
             future.result(timeout=30)
@@ -242,7 +323,7 @@ def _falar_edge_tts(texto: str, output_path: str, use_cache: bool = True) -> str
             if _safe_atomic_save(temp_path, output_path):
                 file_size = os.path.getsize(output_path)
                 print(
-                    f"[TTS] Audio gerado via Edge TTS (voz PT: {voice}, voz EN: {voice_en}) "
+                    f"[TTS] Audio gerado via Edge TTS ({voice}, rate={rate}, pitch={pitch}) "
                     f"-> {output_path} ({file_size} bytes)"
                 )
                 return output_path
@@ -250,6 +331,13 @@ def _falar_edge_tts(texto: str, output_path: str, use_cache: bool = True) -> str
 
     except Exception as e:
         print(f"[TTS] Erro Edge TTS: {e}")
+        offline_enabled = os.getenv("TTS_OFFLINE_FALLBACK", "true").strip().lower() not in (
+            "false",
+            "0",
+            "no",
+        )
+        if offline_enabled and not _em_teste():
+            return _falar_windows_offline(texto, output_path)
         return ""
     finally:
         if os.path.exists(temp_path):
@@ -285,51 +373,133 @@ def limpar_cache_audio(max_idade_segundos: int = 3600) -> int:
 def limpar_texto_para_fala(texto: str) -> str:
     """
     Higieniza o texto removendo caracteres markdown para síntese vocal suave.
-    Elimina asteriscos (*, **), cabeçalhos (#), crases, links markdown e marcadores,
-    evitando que os motores TTS pronunciem 'asterisco' ou pontuações estranhas.
+    Mantido 100% compatível com o contrato unitário de limpeza básica.
     """
     if not texto:
         return ""
-    t = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', texto)
-    t = re.sub(r'\*+', '', t)
-    t = re.sub(r'`+', '', t)
-    t = re.sub(r'#+\s*', '', t)
-    t = re.sub(r'^\s*[-*+]\s+', '', t, flags=re.MULTILINE)
-    t = re.sub(r'[_~>|]', ' ', t)
-    t = re.sub(r'\(?\s*l[eê]-se\s+fra?y[i]?vis\s*\)?', '', t, flags=re.IGNORECASE)
-    t = re.sub(r'\(?\s*pronuncia-se\s+fra?y[i]?vis\s*\)?', '', t, flags=re.IGNORECASE)
-    t = re.sub(r'\bF\.?R\.?Y\.?I\.?V\.?s\b', 'Frayvis', t, flags=re.IGNORECASE)
-    t = re.sub(r'F\.R\.Y\.I\.Vs', 'Frayvis', t, flags=re.IGNORECASE)
-    t = re.sub(r'FRYIVs', 'Frayvis', t, flags=re.IGNORECASE)
-    t = re.sub(r'\bFryvis\b', 'Frayvis', t, flags=re.IGNORECASE)
-    t = re.sub(r'\s+', ' ', t).strip()
+    t = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", texto)
+    t = re.sub(r"\*+", "", t)
+    t = re.sub(r"`+", "", t)
+    t = re.sub(r"#+\s*", "", t)
+    t = re.sub(r"^\s*[-*+]\s+", "", t, flags=re.MULTILINE)
+    t = re.sub(r"[_~>|]", " ", t)
+    t = re.sub(r"\(?\s*l[eê]-se\s+fra?y[i]?vis\s*\)?", "", t, flags=re.IGNORECASE)
+    t = re.sub(r"\(?\s*pronuncia-se\s+fra?y[i]?vis\s*\)?", "", t, flags=re.IGNORECASE)
+    t = re.sub(r"\bF\.?R\.?Y\.?I\.?V\.?s\b", "Frayvis", t, flags=re.IGNORECASE)
+    t = re.sub(r"F\.R\.Y\.I\.Vs", "Frayvis", t, flags=re.IGNORECASE)
+    t = re.sub(r"FRYIVs", "Frayvis", t, flags=re.IGNORECASE)
+    t = re.sub(r"\bFryvis\b", "Frayvis", t, flags=re.IGNORECASE)
+    t = re.sub(r"\s+", " ", t).strip()
     return t
+
+
+def humanizar_texto_para_fala(texto: str) -> str:
+    """
+    Camada avançada de naturalização prosódica e fonética em Português:
+    - Substitui blocos de código extensos e URLs cruas por resumos naturais.
+    - Insere pausas respiratórias em listas e quebras de seção para evitar atropelo.
+    - Converte moedas, graus e siglas técnicas para pronúncia natural.
+    """
+    if not texto:
+        return ""
+
+    t = texto
+    # 1. Blocos de código cercados por ```...``` viram aviso falado conciso
+    t = re.sub(
+        r"```[\s\S]*?```",
+        " Deixei o código detalhado no terminal. ",
+        t,
+    )
+
+    # 2. Preserva rótulo de links markdown [rótulo](url) antes de remover URLs soltas
+    t = re.sub(r"\[([^\]]+)\]\(https?://[^)\s]+\)", r"\1", t)
+    t = re.sub(r"https?://\S+", " link disponível no chat ", t)
+
+    # 3. Adiciona pontuação prosódica ao fim de linhas de lista/título sem pontuação final
+    linhas_ajustadas: list[str] = []
+    for linha in t.splitlines():
+        s = linha.strip()
+        if not s:
+            continue
+        eh_item_ou_titulo = bool(re.match(r"^(?:[-*+•]|\d+[.)]|#+)\s+", s))
+        s = re.sub(r"^(?:[-*+•]|\d+[.)])\s+", "", s)
+        s = re.sub(r"^#+\s*", "", s)
+        if eh_item_ou_titulo and s and s[-1] not in ".!?:;,":
+            s = f"{s}."
+        linhas_ajustadas.append(s)
+    t = " ".join(linhas_ajustadas)
+
+    # 4. Expansões fonéticas naturais para PT-BR
+    t = re.sub(r"R\$\s*(\d+(?:[.,]\d+)?)", r"\1 reais", t)
+    t = re.sub(r"US\$\s*(\d+(?:[.,]\d+)?)", r"\1 dólares", t)
+    t = re.sub(r"(\d+)\s*°C\b", r"\1 graus Celsius", t)
+    t = re.sub(r"\bE2EE\b", "criptografia ponta a ponta", t)
+    t = re.sub(r"\bchunks\s+KB\b", "blocos na base de conhecimento", t, flags=re.IGNORECASE)
+
+    return limpar_texto_para_fala(t)
+
+
+def dividir_em_sentencas_fala(
+    texto_humanizado: str, min_chars: int = 38, max_chars: int = 230
+) -> list[str]:
+    """
+    Divide um texto já humanizado em sentenças equilibradas para síntese streaming,
+    unindo fragmentos muito curtos ("Sim, senhor.") à sentença seguinte para manter fluidez.
+    """
+    limpo = (texto_humanizado or "").strip()
+    if not limpo:
+        return []
+    if len(limpo) <= min_chars * 2:
+        return [limpo]
+
+    partes_brutas = [p.strip() for p in re.split(r"(?<=[.!?;])\s+", limpo) if p.strip()]
+    sentencas: list[str] = []
+    buffer = ""
+
+    for parte in partes_brutas:
+        if not buffer:
+            buffer = parte
+        elif len(buffer) < min_chars or (len(buffer) + 1 + len(parte) <= 95):
+            buffer = f"{buffer} {parte}"
+        else:
+            sentencas.append(buffer)
+            buffer = parte
+
+        while len(buffer) > max_chars:
+            corte = buffer.rfind(", ", min_chars, max_chars)
+            if corte == -1:
+                corte = buffer.rfind(" ", min_chars, max_chars)
+            if corte == -1:
+                break
+            sentencas.append(buffer[:corte].strip())
+            buffer = buffer[corte:].strip(", ").strip()
+
+    if buffer:
+        if sentencas and len(buffer) < 22:
+            sentencas[-1] = f"{sentencas[-1]} {buffer}"
+        else:
+            sentencas.append(buffer)
+
+    return sentencas
 
 
 def falar(
     texto: str,
     output_path: Optional[str] = "resposta.mp3",
-    unique_file: bool = False
+    unique_file: bool = False,
 ) -> str:
     """
-    Gera áudio da fala com thread-safety completo para múltiplos usuários/threads.
-    Higieniza previamente o texto para remover asteriscos e marcas markdown.
-    
-    Args:
-        texto: Conteúdo a ser sintetizado
-        output_path: Caminho de saída desejado. Se None ou se unique_file=True,
-                     um arquivo exclusivo e isolado é gerado em audio_cache/.
-        unique_file: Se True, garante geração em arquivo individual com UUID.
-    
-    Retorna o caminho do arquivo gerado ou string vazia se indisponível.
+    Gera áudio da fala com thread-safety completo e humanização prosódica.
     """
     from core.e2ee_auth import is_session_unlocked
+
     if not is_session_unlocked():
         print("[TTS] Saída de voz bloqueada (F.R.Y.I.Vs travada via E2EE).")
         return ""
 
     try:
         from core.mute_state import is_muted
+
         if is_muted():
             print("[TTS] Saída de voz bloqueada (sistema mutado).")
             return ""
@@ -339,7 +509,7 @@ def falar(
     if not texto or not texto.strip():
         return ""
 
-    texto_para_voz = limpar_texto_para_fala(texto)
+    texto_para_voz = humanizar_texto_para_fala(texto)
     if not texto_para_voz:
         return ""
 
@@ -351,6 +521,9 @@ def falar(
 
     load_dotenv()
     provider = os.getenv("TTS_PROVIDER", "auto").strip().lower()
+
+    if provider == "offline":
+        return _falar_windows_offline(texto_para_voz, target_path)
 
     if provider == "voicestudio":
         if falar_voicestudio is not None:
@@ -391,3 +564,80 @@ def falar(
 
     print("[TTS] Nenhum provedor TTS disponivel.")
     return ""
+
+
+def falar_streaming_local(
+    texto: str,
+    output_path: str = "resposta.mp3",
+    tocar_fn: Optional[Callable[[str, bool], bool]] = None,
+) -> tuple[str, bool]:
+    """
+    Síntese e reprodução local por sentenças com baixa latência de 1ª palavra:
+    1. Divide respostas longas em sentenças naturais.
+    2. Sintetiza a 1ª sentença e já dispara `tocar(bloquear=False)` imediatamente.
+    3. Sintetiza as demais em sequência, enfileirando no `audio_player` e aguardando a última.
+    4. Salva o áudio completo consolidado em `output_path` para consumo web (`/api/audio/last`).
+    """
+    from core.e2ee_auth import is_session_unlocked
+
+    if not is_session_unlocked() or not texto or not texto.strip():
+        return "", False
+
+    if tocar_fn is None:
+        from core.audio_player import tocar as _default_tocar
+
+        tocar_fn = lambda p, b: _default_tocar(p, bloquear=b)
+
+    humanizado = humanizar_texto_para_fala(texto)
+    sentencas = dividir_em_sentencas_fala(humanizado)
+    if len(sentencas) <= 1:
+        caminho = falar(texto, output_path=output_path)
+        if caminho and os.path.exists(caminho) and os.path.getsize(caminho) > 0:
+            tocou = bool(tocar_fn(caminho, True))
+            return caminho, tocou
+        return "", False
+
+    arquivos_gerados: list[str] = []
+    tocou_algum = False
+    try:
+        from core.command_control import check_cancelled
+
+        for idx, sentenca in enumerate(sentencas):
+            check_cancelled()
+            eh_ultima = idx == len(sentencas) - 1
+            chunk_path = falar(sentenca, unique_file=True)
+            if not chunk_path or not os.path.exists(chunk_path):
+                continue
+            arquivos_gerados.append(chunk_path)
+            ok = bool(tocar_fn(chunk_path, eh_ultima))
+            tocou_algum = tocou_algum or ok
+
+        if not arquivos_gerados:
+            return "", False
+
+        # Consolida MP3 completo em output_path para /api/audio/last
+        todos_mp3 = all(p.lower().endswith(".mp3") for p in arquivos_gerados)
+        if todos_mp3 and output_path:
+            temp_merged = f"{output_path}.tmp_merge_{os.getpid()}_{uuid.uuid4().hex[:8]}"
+            try:
+                with open(temp_merged, "wb") as out_f:
+                    for part in arquivos_gerados:
+                        with open(part, "rb") as in_f:
+                            shutil.copyfileobj(in_f, out_f)
+                if _safe_atomic_save(temp_merged, output_path):
+                    return output_path, tocou_algum
+            finally:
+                if os.path.exists(temp_merged):
+                    try:
+                        os.remove(temp_merged)
+                    except Exception:
+                        pass
+
+        return arquivos_gerados[-1], tocou_algum
+    finally:
+        for p in arquivos_gerados:
+            if p != output_path and os.path.exists(p):
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass

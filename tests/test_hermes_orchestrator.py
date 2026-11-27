@@ -951,15 +951,33 @@ class TestHermesSkillsAndWslScript:
             http_transport=httpx.MockTransport(_fast_mock),
         )
 
-        # Schemas OpenAI válidos para todas as 4 skills
-        assert len(hermes_ops.HERMES_SCHEMAS) == 4
+        # Schemas OpenAI válidos para todas as 6 skills de manipulação de agentes e Escritório 3D
+        assert len(hermes_ops.HERMES_SCHEMAS) == 6
         schema_names = {s["function"]["name"] for s in hermes_ops.HERMES_SCHEMAS}
         assert schema_names == {
             "delegar_missao_hermes",
             "consultar_status_agentes",
+            "curar_resultado_agente",
+            "controlar_escritorio_agentes",
             "cancelar_missao_agente",
             "listar_perfis_hermes",
         }
+
+        # controlar_escritorio_agentes emite comandos em tempo real
+        events: list[dict[str, Any]] = []
+        reset_orchestrator(
+            policy_engine=policy,
+            budget_guard=BudgetGuard(),
+            http_transport=httpx.MockTransport(_fast_mock),
+            on_event=events.append,
+        )
+        open_out = hermes_ops.controlar_escritorio_agentes(acao="abrir")
+        assert "Escritório 3D" in open_out
+        party_out = hermes_ops.controlar_escritorio_agentes(acao="festa")
+        assert "festa" in party_out.lower()
+        act_out = hermes_ops.controlar_escritorio_agentes(acao="atividade", atividade="pingpong")
+        assert "pingpong" in act_out
+        assert any(e.get("type") == "agent_office_command" and e.get("action") == "party" for e in events)
 
         # listar_perfis_hermes
         perfis_out = hermes_ops.listar_perfis_hermes()
@@ -1133,3 +1151,16 @@ class TestHermesSkillsAndWslScript:
         assert all(item.job_id != j2.job_id for item in orch.list_jobs())
         files_after = list((fake_kb_dir / "agentes_curados").glob("*.md"))
         assert len(files_after) == len(files_before)
+
+        # 4. curar_resultado_agente via skill direta da F.R.Y.I.Vs (indexar e descartar sem job_id explícito)
+        j3 = orch.submit_job("ideias", "Sugerir arquitetura modular", dispatch_background=False)
+        asyncio.run(orch.execute_job_async(j3.job_id))
+        skill_idx_out = hermes_ops.curar_resultado_agente(acao="indexar", perfil="ideias")
+        assert "indexado" in skill_idx_out.lower()
+        assert orch.get_job(j3.job_id).kb_status == "indexed"
+
+        j4 = orch.submit_job("engenheiro", "Auditoria temporária", dispatch_background=False)
+        asyncio.run(orch.execute_job_async(j4.job_id))
+        skill_disc_out = hermes_ops.curar_resultado_agente(acao="descartar", perfil="engenheiro")
+        assert "descartado" in skill_disc_out.lower()
+        assert orch.get_job(j4.job_id).kb_status == "discarded"

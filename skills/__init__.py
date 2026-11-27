@@ -77,9 +77,15 @@ from .n8n_ops import (
 from .hermes_ops import (
     delegar_missao_hermes,
     consultar_status_agentes,
+    curar_resultado_agente,
+    controlar_escritorio_agentes,
     cancelar_missao_agente,
     listar_perfis_hermes,
     HERMES_SCHEMAS,
+)
+from .clap_ops import (
+    configurar_ativacao_palmas,
+    CLAP_SCHEMAS,
 )
 
 SKILLS_REGISTRY: Final[dict[str, Callable[..., str]]] = {
@@ -131,8 +137,11 @@ SKILLS_REGISTRY: Final[dict[str, Callable[..., str]]] = {
     "consultar_execucoes_n8n": consultar_execucoes_n8n,
     "delegar_missao_hermes": delegar_missao_hermes,
     "consultar_status_agentes": consultar_status_agentes,
+    "curar_resultado_agente": curar_resultado_agente,
+    "controlar_escritorio_agentes": controlar_escritorio_agentes,
     "cancelar_missao_agente": cancelar_missao_agente,
     "listar_perfis_hermes": listar_perfis_hermes,
+    "configurar_ativacao_palmas": configurar_ativacao_palmas,
 }
 
 ALL_SKILL_SCHEMAS: Final[list[dict[str, Any]]] = [
@@ -146,6 +155,7 @@ ALL_SKILL_SCHEMAS: Final[list[dict[str, Any]]] = [
     *CODE_GRAPH_SCHEMAS,
     *N8N_SCHEMAS,
     *HERMES_SCHEMAS,
+    *CLAP_SCHEMAS,
 ]
 
 
@@ -155,10 +165,17 @@ def execute_skill(function_name: str, arguments: dict[str, Any] | None = None) -
     Retorna sempre uma string informativa com o resultado ou o erro capturado.
     """
     from core.command_control import check_cancelled
+    from core.runtime_mode import is_skill_allowed_in_mode
     check_cancelled()
 
     if not function_name:
         return "Erro: Nome da skill não especificado."
+
+    if not is_skill_allowed_in_mode(function_name):
+        return (
+            f"A skill '{function_name}' controla a área de trabalho física do Windows e está "
+            "indisponível na versão Web Cloud. Use a F.R.Y.I.Vs no seu PC para automações locais de tela/janelas."
+        )
 
     if function_name not in SKILLS_REGISTRY:
         return f"Erro: Skill '{function_name}' não encontrada no registro de habilidades."

@@ -31,7 +31,8 @@ from core.session_state import (
     mesclar_historico,
     registrar_turno,
 )
-from core.tts import falar
+from core.tts import AUDIO_CACHE_DIR, falar, falar_streaming_local
+from core.runtime_mode import is_web_mode
 
 
 def _deve_tocar_local(origem: str, explicito: bool | None) -> bool:
@@ -220,28 +221,69 @@ async def processar_comando(
                 "state": "speaking",
                 "detail": "Sintetizando voz...",
             })
-        audio_path = await asyncio.to_thread(lambda: falar_fn(resposta, output_path="resposta.mp3"))
-        check_cancelled()
-        if audio_path and os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
-            has_audio = True
-            audio_url = f"/api/audio/last?v={uuid.uuid4().hex[:8]}"
-            deve_tocar = _deve_tocar_local(origem, tocar_local)
+        deve_tocar = _deve_tocar_local(origem, tocar_local)
+        usar_streaming_sentencas = (
+            deve_tocar
+            and falar_fn is falar
+            and len(resposta) > 110
+        )
+
+        if usar_streaming_sentencas:
             if broadcast_fn and origem == "daemon":
                 await broadcast_fn({
                     "type": "chat_response",
                     "user_message": texto,
                     "response": resposta,
                     "tools_executed": ferramentas_executadas,
-                    "has_audio": has_audio,
-                    "audio_url": audio_url,
-                    "played_locally": bool(deve_tocar),
+                    "has_audio": True,
+                    "audio_url": "",
+                    "played_locally": True,
                 })
                 chat_response_enviado = True
-            if deve_tocar:
-                status_overlay("Respondendo ao senhor...", ativo=True, duracao=8.0)
-                played_locally = await asyncio.to_thread(
-                    lambda: tocar_audio_local(audio_path, bloquear=True)
+            status_overlay("Respondendo ao senhor...", ativo=True, duracao=8.0)
+            audio_path, played_locally = await asyncio.to_thread(
+                lambda: falar_streaming_local(resposta, output_path="resposta.mp3")
+            )
+            check_cancelled()
+            if audio_path and os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
+                has_audio = True
+                audio_url = f"/api/audio/last?v={uuid.uuid4().hex[:8]}"
+        else:
+            if is_web_mode():
+                from core.runtime_mode import get_audio_cache_dir
+                req_audio_id = f"resp_{uuid.uuid4().hex[:16]}"
+                cache_dir = str(get_audio_cache_dir())
+                os.makedirs(cache_dir, exist_ok=True)
+                target_out = os.path.join(cache_dir, f"{req_audio_id}.mp3")
+                audio_path = await asyncio.to_thread(
+                    lambda: falar_fn(resposta, output_path=target_out)
                 )
+                check_cancelled()
+                if audio_path and os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
+                    has_audio = True
+                    audio_url = f"/api/audio/{req_audio_id}"
+            else:
+                audio_path = await asyncio.to_thread(lambda: falar_fn(resposta, output_path="resposta.mp3"))
+                check_cancelled()
+                if audio_path and os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
+                    has_audio = True
+                    audio_url = f"/api/audio/last?v={uuid.uuid4().hex[:8]}"
+                    if broadcast_fn and origem == "daemon":
+                        await broadcast_fn({
+                            "type": "chat_response",
+                            "user_message": texto,
+                            "response": resposta,
+                            "tools_executed": ferramentas_executadas,
+                            "has_audio": has_audio,
+                            "audio_url": audio_url,
+                            "played_locally": bool(deve_tocar),
+                        })
+                        chat_response_enviado = True
+                    if deve_tocar:
+                        status_overlay("Respondendo ao senhor...", ativo=True, duracao=8.0)
+                        played_locally = await asyncio.to_thread(
+                            lambda: tocar_audio_local(audio_path, bloquear=True)
+                        )
         definir_falando(False, cooldown=0.8)
 
     if broadcast_fn and origem == "daemon" and not chat_response_enviado:

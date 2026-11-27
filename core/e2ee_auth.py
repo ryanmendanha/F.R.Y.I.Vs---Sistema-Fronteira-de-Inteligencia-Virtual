@@ -658,6 +658,11 @@ e2ee_router = APIRouter(prefix="/api/auth/e2ee", tags=["E2EE Security"])
 
 
 def _client_id_from_request(request: Request) -> str:
+    xff = request.headers.get("x-forwarded-for", "").strip()
+    if xff:
+        first_ip = xff.split(",")[0].strip()
+        if first_ip:
+            return first_ip[:64]
     if request.client and request.client.host:
         return request.client.host
     return "local"
@@ -682,7 +687,8 @@ def get_e2ee_status(
     token = extract_e2ee_token(x_e2ee_session, authorization, e2ee_token)
     session_valid = validate_session_token(token) is not None if token else False
     required = is_e2ee_required()
-    unlocked = is_session_unlocked()
+    from core.runtime_mode import is_web_mode
+    unlocked = (session_valid if required else True) if is_web_mode() else is_session_unlocked()
 
     return {
         "required": required,
@@ -846,10 +852,18 @@ def post_e2ee_unlock(req: E2EEUnlockRequest, request: Request) -> dict[str, Any]
 
 @e2ee_router.post("/lock")
 def post_e2ee_lock(
-    _e2ee: E2EESessionRecord | None = Depends(require_e2ee_session),
+    e2ee_session: E2EESessionRecord | None = Depends(require_e2ee_session),
 ) -> dict[str, Any]:
-    """Bloqueia imediatamente a F.R.Y.I.Vs (exige sessão E2EE válida para evitar CSRF/DoS)."""
-    lock_all_sessions()
+    """Bloqueia a sessão E2EE atual (ou todas em modo desktop)."""
+    from core.runtime_mode import is_web_mode
+    if is_web_mode() and e2ee_session is not None:
+        with _state_lock:
+            _sessions.pop(e2ee_session.token, None)
+            if not _sessions:
+                global _global_unlocked
+                _global_unlocked = False
+    else:
+        lock_all_sessions()
     return {
         "unlocked": False,
         "locked": True,

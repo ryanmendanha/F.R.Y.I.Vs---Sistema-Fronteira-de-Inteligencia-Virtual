@@ -64,13 +64,26 @@
     color: #93c5fd;
     border-radius: 6px;
     font-size: 11px;
-    width: 22px; height: 22px;
+    width: 24px; height: 24px;
     display: flex; align-items: center; justify-content: center;
     cursor: pointer;
     transition: background .2s, border-color .2s;
     flex-shrink: 0;
   }
-  #fry-live .fry-btn:hover { background: rgba(80,160,255,.20); border-color: rgba(80,160,255,.55); }
+  #fry-live .fry-btn:hover { background: rgba(80,160,255,.20); border-color: rgba(80,160,255,.55); color: #e0f2fe; }
+  .fry-i8 {
+    display: inline-block;
+    width: 13px;
+    height: 13px;
+    background-color: currentColor;
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    -webkit-mask-position: center;
+    mask-position: center;
+    -webkit-mask-size: contain;
+    mask-size: contain;
+    pointer-events: none;
+  }
 
   /* ── Menu de docking ── */
   #fry-dock-menu {
@@ -180,6 +193,9 @@
   style.textContent = css;
   document.head.appendChild(style);
 
+  const i8 = (name) =>
+    `<span class="fry-i8" style="mask-image:url(/static/icons8/${name}.png);-webkit-mask-image:url(/static/icons8/${name}.png)"></span>`;
+
   /* ── Estrutura HTML da janela ── */
   const panel = document.createElement("div");
   panel.id = "fry-live";
@@ -188,10 +204,10 @@
     <header id="fry-live-head">
       <i class="dot off" id="fry-live-dot"></i>
       <span class="fry-title">TELA AO VIVO · F.R.Y.I.VS</span>
-      <button class="fry-btn" id="fry-live-size" title="Expandir / Reduzir">⤢</button>
-      <button class="fry-btn" id="fry-live-min"  title="Minimizar">─</button>
+      <button class="fry-btn" id="fry-live-size" title="Expandir / Reduzir">${i8("maximize")}</button>
+      <button class="fry-btn" id="fry-live-min"  title="Minimizar">${i8("minus")}</button>
       <div style="position:relative">
-        <button class="fry-btn" id="fry-live-dock" title="Acoplar em canto">⊞</button>
+        <button class="fry-btn" id="fry-live-dock" title="Acoplar em canto">${i8("dock-grid")}</button>
         <div id="fry-dock-menu">
           <button id="fry-dock-bl">↙ Inferior Esquerdo</button>
           <button id="fry-dock-br">↘ Inferior Direito</button>
@@ -201,7 +217,7 @@
           <button id="fry-dock-free">⊹ Livre (arrastar)</button>
         </div>
       </div>
-      <button class="fry-btn" id="fry-live-close" title="Fechar">✕</button>
+      <button class="fry-btn" id="fry-live-close" title="Fechar">${i8("close")}</button>
     </header>
     <div class="view">
       <img id="fry-live-img" alt="Tela ao vivo da área de trabalho"/>
@@ -219,7 +235,7 @@
   const toggle = document.createElement("button");
   toggle.id = "fry-live-toggle";
   toggle.style.display = "none";
-  toggle.innerHTML = `◉ TELA AO VIVO`;
+  toggle.innerHTML = `${i8("live-tv")} TELA AO VIVO`;
   document.body.appendChild(toggle);
 
   function getStreamUrl() {
@@ -360,8 +376,17 @@
   }
 
   const fetchOriginal = window.fetch;
+  let runtimeIsWeb = false;
+  fetchOriginal("/api/status")
+    .then((r) => r.json())
+    .then((st) => {
+      if (st && st.runtime_mode === "web") runtimeIsWeb = true;
+    })
+    .catch(() => {});
+
   window.fetch = async function (...args) {
     const resp = await fetchOriginal.apply(this, args);
+    if (runtimeIsWeb) return resp;
     try {
       const url = String(args[0] && args[0].url ? args[0].url : args[0]);
       if (/\/api\/(chat|voice\/listen)/.test(url)) {
@@ -383,7 +408,7 @@
   const head = panel.querySelector("#fry-live-head");
   let dx = 0, dy = 0, arrastando = false;
   head.addEventListener("mousedown", (e) => {
-    if (e.target.tagName === "BUTTON" || e.target.closest("#fry-dock-menu")) return;
+    if (e.target.closest("button") || e.target.closest("#fry-dock-menu")) return;
     arrastando = true;
     const r = panel.getBoundingClientRect();
     dx = e.clientX - r.left;

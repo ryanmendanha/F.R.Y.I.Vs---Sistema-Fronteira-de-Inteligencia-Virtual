@@ -37,7 +37,8 @@ def _mci(comando: str) -> str:
 
 def _tocar_arquivo(caminho: str) -> None:
     alias = f"fry{uuid.uuid4().hex[:8]}"
-    _mci(f'open "{caminho}" type mpegvideo alias {alias}')
+    mci_type = "waveaudio" if caminho.lower().endswith(".wav") else "mpegvideo"
+    _mci(f'open "{caminho}" type {mci_type} alias {alias}')
     try:
         _mci(f"play {alias}")
         inicio = time.time()
@@ -105,7 +106,8 @@ def tocar(caminho: str, bloquear: bool = True, timeout: float = 120.0) -> bool:
     except Exception:
         pass
     os.makedirs(_TMP_DIR, exist_ok=True)
-    copia = os.path.join(_TMP_DIR, f"{uuid.uuid4().hex}.mp3")
+    ext = ".wav" if caminho.lower().endswith(".wav") else ".mp3"
+    copia = os.path.join(_TMP_DIR, f"{uuid.uuid4().hex}{ext}")
     try:
         shutil.copy2(caminho, copia)
     except OSError:

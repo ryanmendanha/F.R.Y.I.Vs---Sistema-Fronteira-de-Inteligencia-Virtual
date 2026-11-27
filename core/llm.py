@@ -75,6 +75,10 @@ MODO SUPERCOMPUTADOR (EDIÇÃO AO VIVO E CO-PILOTO EM SEGUNDO PLANO):
 - Quando houver um `[Estado de Trabalho Ativo em Segundo Plano]` no contexto (planilha Excel, documento Word ou página Web ativa) e o senhor solicitar edições ou ações de continuação sem repetir o nome do arquivo/site (ex.: "adicione uma linha com...", "remova a linha...", "adicione um parágrafo...", "abra o primeiro link", "clique em...", "role para baixo", "leia a página"):
   - Utilize imediatamente o caminho ou URL do artefato ativo correspondente e dispare a ferramenta apropriada (`editar_planilha`, `editar_documento_word`, `clicar_elemento_web`, `interagir_pagina_web`, `ler_conteudo_pagina`, `digitar_campo_web`).
   - As janelas do Excel, Word e Navegador permanecem visíveis e são atualizadas em tempo real.
+
+CONTROLE DIRETO DO ESQUADRÃO DE 4 AGENTES E ESCRITÓRIO 3D:
+- Você comanda diretamente 4 agentes especialistas no sistema: `pesquisador`, `organizador` (Organizador de Dados), `ideias` (Agente de Ideias) e `engenheiro`.
+- Use `delegar_missao_hermes` para mandar qualquer um deles executar tarefas, `consultar_status_agentes` para ver andamento/resultados, `curar_resultado_agente` para indexar na Base de Conhecimento ou descartar resultados, `controlar_escritorio_agentes` para abrir/fechar o Escritório 3D, focar em um agente, ativar festa ou atividades (`coffee`, `pingpong`, `game`, `band`, `dance`, `chat`, `plant`), e `cancelar_missao_agente` para interrompê-los.
 """
 
 CONVERSATIONAL_PROMPT: Final[str] = """\

@@ -37,8 +37,14 @@ _PROTECTED_PATHS: Final[set[str]] = {
     "c:\\program files (x86)", os.environ.get("SYSTEMROOT", "c:\\windows").lower()
 }
 
+from core.runtime_mode import get_files_workspace_dir, is_web_mode
+
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
-PLANILHAS_DIR: Final[Path] = PROJECT_ROOT / "planilhas-fryivs"
+PLANILHAS_DIR: Final[Path] = get_files_workspace_dir()
+
+
+def _workspace_dir() -> Path:
+    return get_files_workspace_dir()
 
 
 def _normalizar_nome_xlsx(nome: str) -> str:
@@ -59,11 +65,12 @@ def _caminho_nova_planilha(nome: str) -> Path:
     bruto = str(nome or "").strip().strip('"').strip("'")
     norm = _normalizar_nome_xlsx(bruto)
     p_cand = Path(norm)
-    if p_cand.parent != Path("."):
+    ws_dir = _workspace_dir()
+    if p_cand.parent != Path(".") and not is_web_mode():
         p_cand.parent.mkdir(parents=True, exist_ok=True)
         return p_cand.resolve()
-    PLANILHAS_DIR.mkdir(parents=True, exist_ok=True)
-    return PLANILHAS_DIR / p_cand.name
+    ws_dir.mkdir(parents=True, exist_ok=True)
+    return ws_dir / p_cand.name
 
 
 def _localizar_planilha(nome: str) -> Path | None:
@@ -84,7 +91,9 @@ def _localizar_planilha(nome: str) -> Path | None:
     candidatos = [Path(bruto)]
     if not Path(bruto).suffix:
         candidatos.append(Path(_normalizar_nome_xlsx(bruto)))
+    ws_dir = _workspace_dir()
     for c in list(candidatos):
+        candidatos.append(ws_dir / c.name)
         candidatos.append(PLANILHAS_DIR / c.name)
         candidatos.append(PROJECT_ROOT / c.name)
     for c in candidatos:
@@ -550,8 +559,12 @@ def criar_planilha(
             f"({len(df.columns)} colunas x {len(df)} linhas) com design executivo e auto-filtro."
         )
 
+        from urllib.parse import quote as _url_quote
         from skills.office_live import _em_teste
-        if abrir_no_excel and not _em_teste():
+        if is_web_mode():
+            dl_url = f"/api/files/download/{_url_quote(p.name)}"
+            msg += f" Disponível para download: [Baixar {p.name}]({dl_url})"
+        elif abrir_no_excel and not _em_teste():
             abrir_planilha(str(p))
             msg += " Aberta em segundo plano no Microsoft Excel."
 
@@ -924,8 +937,14 @@ def criar_documento_word(
         if not caminho_str.lower().endswith(".docx"):
             caminho_str = f"{caminho_str}.docx"
 
-        p = Path(caminho_str).resolve()
-        p.parent.mkdir(parents=True, exist_ok=True)
+        p_raw = Path(caminho_str)
+        if is_web_mode() or p_raw.parent == Path("."):
+            ws_dir = _workspace_dir()
+            ws_dir.mkdir(parents=True, exist_ok=True)
+            p = (ws_dir / p_raw.name).resolve()
+        else:
+            p = p_raw.resolve()
+            p.parent.mkdir(parents=True, exist_ok=True)
 
         doc = _Document()
 
@@ -973,8 +992,12 @@ def criar_documento_word(
             f"Total de {num_paragrafos} parágrafos no documento."
         )
 
+        from urllib.parse import quote as _url_quote
         from skills.office_live import _em_teste
-        if abrir_no_word and not _em_teste():
+        if is_web_mode():
+            dl_url = f"/api/files/download/{_url_quote(p.name)}"
+            msg += f" Disponível para download: [Baixar {p.name}]({dl_url})"
+        elif abrir_no_word and not _em_teste():
             abrir_documento_word(str(p))
             msg += " Aberto em segundo plano no Microsoft Word para visualização."
 
@@ -994,6 +1017,14 @@ def _localizar_documento_word(caminho_arquivo: str) -> Path:
                 return Path(str(ativo["caminho"])).resolve()
         except Exception:
             pass
+    if bruto:
+        ws_cand = _workspace_dir() / Path(bruto).name
+        if ws_cand.exists() and ws_cand.is_file():
+            return ws_cand.resolve()
+        if not Path(bruto).suffix:
+            ws_docx = _workspace_dir() / f"{Path(bruto).name}.docx"
+            if ws_docx.exists() and ws_docx.is_file():
+                return ws_docx.resolve()
     caminho = Path(bruto).resolve() if bruto else Path("")
     if not caminho.exists() and bruto:
         caminho = Path(os.path.abspath(bruto))

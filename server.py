@@ -49,7 +49,7 @@ os.environ["ANONYMIZED_TELEMETRY"] = "False"
 import asyncio
 import hmac
 from typing import Any
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -87,8 +87,16 @@ def _verificar_token(authorization: str = Header(default="")) -> None:
 
 
 from core.llm import ask_fryvis, MODEL, MODEL_PROFILES, DEFAULT_PROFILE, LLM_PROVIDER
-from core.gemini_client import is_gemini_configured, is_gemini_online
+from core.gemini_client import is_gemini_configured, is_gemini_online, transcribe_audio_gemini
 from core.memory import salvar_memoria, buscar_contexto, listar_memorias, deletar_memoria
+from core.runtime_mode import (
+    filter_active_skill_schemas,
+    get_audio_cache_dir,
+    get_files_workspace_dir,
+    get_runtime_mode,
+    is_skill_allowed_in_mode,
+    is_web_mode,
+)
 from core.skill_router import get_skill_router
 from core.stt import gravar_audio, transcrever
 from core.tts import falar
@@ -123,31 +131,34 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[Startup] Aviso ao indexar base de conhecimento: {e}")
 
-    try:
-        import requests as _req
-        _req.post(
-            "http://localhost:11434/api/generate",
-            json={"model": MODEL, "prompt": "", "keep_alive": -1, "stream": False},
-            timeout=60,
-        )
-        print(f"[Startup] Modelo '{MODEL}' aquecido e mantido em memória (keep_alive=-1).")
-    except Exception as e:
-        print(f"[Startup] Aviso: não foi possível aquecer o modelo Ollama: {e}")
+    if not is_web_mode():
+        try:
+            import requests as _req
+            _req.post(
+                "http://localhost:11434/api/generate",
+                json={"model": MODEL, "prompt": "", "keep_alive": -1, "stream": False},
+                timeout=60,
+            )
+            print(f"[Startup] Modelo '{MODEL}' aquecido e mantido em memória (keep_alive=-1).")
+        except Exception as e:
+            print(f"[Startup] Aviso: não foi possível aquecer o modelo Ollama: {e}")
 
-    try:
-        from core.overlay import iniciar_overlay
-        iniciar_overlay()
-        print("[Startup] Barra flutuante da FRYIVS ativa.")
-    except Exception as e:
-        print(f"[Startup] Aviso: barra flutuante indisponível: {e}")
+        try:
+            from core.overlay import iniciar_overlay
+            iniciar_overlay()
+            print("[Startup] Barra flutuante da FRYIVS ativa.")
+        except Exception as e:
+            print(f"[Startup] Aviso: barra flutuante indisponível: {e}")
 
-    try:
-        from core import voice_daemon
-        loop_atual = asyncio.get_running_loop()
-        if voice_daemon.iniciar(loop_atual, manager.broadcast):
-            print("[Startup] VoiceDaemon de Wake Word ('FRYIVS/Frives') ativo no servidor.")
-    except Exception as e:
-        print(f"[Startup] Aviso ao iniciar VoiceDaemon: {e}")
+        try:
+            from core import voice_daemon
+            loop_atual = asyncio.get_running_loop()
+            if voice_daemon.iniciar(loop_atual, manager.broadcast):
+                print("[Startup] VoiceDaemon de Wake Word ('FRYIVS/Frives') ativo no servidor.")
+        except Exception as e:
+            print(f"[Startup] Aviso ao iniciar VoiceDaemon: {e}")
+    else:
+        print("[Startup] Modo WEB ativo — VoiceDaemon físico, Overlay e Ollama localhost ignorados.")
 
     if not os.getenv("PYTEST_CURRENT_TEST"):
         try:
@@ -198,11 +209,17 @@ _extra_cors = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_DEFAULT_CORS_ORIGINS + _extra_cors,
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+    allow_origin_regex=r"^https?://((localhost|127\.0\.0\.1)(:\d+)?|[a-z0-9-]+\.up\.railway\.app)$",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-E2EE-Session"],
+    allow_headers=["Authorization", "Content-Type", "X-E2EE-Session", "X-File-Name"],
 )
+
+
+@app.get("/health")
+def healthcheck() -> dict[str, Any]:
+    """Healthcheck leve para Railway / Docker sem exigir sessão E2EE."""
+    return {"status": "ok", "mode": get_runtime_mode()}
 
 app.include_router(e2ee_router)
 
@@ -213,7 +230,7 @@ except ImportError:
     pass
 
 from core.n8n_bridge import n8n_router
-from core.agent_orchestrator import agents_router
+from core.agent_orchestrator import agents_router, get_orchestrator
 
 app.include_router(n8n_router)
 app.include_router(agents_router)
@@ -259,6 +276,18 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()
+
+
+def _broadcast_agent_event(message: dict[str, Any]) -> None:
+    try:
+        loop = _server_loop
+        if loop is not None and loop.is_running():
+            asyncio.run_coroutine_threadsafe(manager.broadcast(message), loop)
+    except Exception:
+        pass
+
+
+get_orchestrator().set_event_broadcaster(_broadcast_agent_event)
 
 
 def _on_e2ee_lock() -> None:
@@ -386,6 +415,7 @@ def get_system_status() -> dict[str, Any]:
         "voice_daemon_active": daemon_info.get("active", False),
         "mic_muted": daemon_info.get("muted", False),
         "active_artifact": artefato,
+        "runtime_mode": get_runtime_mode(),
         "e2ee_required": is_e2ee_required(),
         "e2ee_unlocked": is_session_unlocked(),
     }
@@ -637,6 +667,38 @@ def get_mic_mute_status() -> dict[str, Any]:
     return {"muted": voice_daemon.is_muted()}
 
 
+class ClapConfigRequest(BaseModel):
+    enabled: bool | None = Field(default=None, description="Habilita ou desabilita despertar por duas palmas")
+    sensitivity: str | None = Field(default=None, description="Sensibilidade: baixa, media ou alta")
+
+
+@app.get("/api/voice/clap")
+def get_clap_status() -> dict[str, Any]:
+    """Retorna o estado atual do detector de duas palmas (Clap on Jarvis)."""
+    from core.clap_detector import get_clap_detector
+    return get_clap_detector().status()
+
+
+@app.post("/api/voice/clap")
+async def update_clap_config(
+    req: ClapConfigRequest,
+    _e2ee: E2EESessionRecord | None = Depends(require_e2ee_session),
+) -> dict[str, Any]:
+    """Atualiza estado ativo e/ou sensibilidade do detector de duas palmas."""
+    from core.clap_detector import get_clap_detector
+    det = get_clap_detector()
+    if req.enabled is not None:
+        det.set_enabled(req.enabled)
+    if req.sensitivity:
+        try:
+            det.set_sensitivity(req.sensitivity)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    st = det.status()
+    await manager.broadcast({"type": "clap_config", **st})
+    return st
+
+
 @app.get("/api/audio/last")
 def get_last_audio(
     _e2ee: E2EESessionRecord | None = Depends(require_e2ee_session),
@@ -666,7 +728,7 @@ def get_audio_by_id(
     safe = request_id.replace("-", "").replace("_", "")
     if not safe.isalnum() or len(request_id) > 64:
         raise HTTPException(status_code=400, detail="request_id inválido.")
-    audio_cache_dir = os.path.join(os.path.dirname(__file__), "audio_cache")
+    audio_cache_dir = str(get_audio_cache_dir())
     candidate = os.path.join(audio_cache_dir, f"{request_id}.mp3")
     if not os.path.exists(candidate) or os.path.getsize(candidate) == 0:
         candidate = os.path.join(os.path.dirname(__file__), "resposta.mp3")
@@ -761,10 +823,171 @@ def remove_memory(
 
 @app.get("/api/skills")
 def list_skills() -> dict[str, Any]:
-    """Retorna todas as skills e seus respectivos esquemas."""
+    """Retorna todas as skills ativas no modo atual e seus respectivos esquemas."""
+    active_names = [k for k in SKILLS_REGISTRY.keys() if is_skill_allowed_in_mode(k)]
     return {
-        "skills": list(SKILLS_REGISTRY.keys()),
-        "schemas": ALL_SKILL_SCHEMAS
+        "skills": active_names,
+        "schemas": filter_active_skill_schemas(list(ALL_SKILL_SCHEMAS)),
+    }
+
+
+@app.post("/api/voice/transcribe")
+async def voice_transcribe_web(
+    request: Request,
+    profile: str = Query(DEFAULT_PROFILE),
+    provider: str | None = Query(default=None),
+    _e2ee: E2EESessionRecord | None = Depends(require_e2ee_session),
+) -> dict[str, Any]:
+    """
+    Recebe áudio capturado pelo navegador (WebAudio / MediaRecorder), transcreve via
+    Gemini Multimodal Audio (ou Whisper local em fallback) e executa o comando na F.R.Y.I.Vs.
+    """
+    raw_audio = await request.body()
+    if not raw_audio or len(raw_audio) < 64:
+        raise HTTPException(status_code=400, detail="Áudio vazio ou muito curto.")
+    if len(raw_audio) > 15 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Áudio excede o limite de 15 MB.")
+
+    mime_type = request.headers.get("content-type", "audio/webm")
+    loop = asyncio.get_running_loop()
+    texto_usuario = await loop.run_in_executor(
+        None, lambda: transcribe_audio_gemini(raw_audio, mime_type=mime_type)
+    )
+
+    if not texto_usuario:
+        sem_fala = "Não consegui ouvir com clareza, senhor. Pode repetir?"
+        return {
+            "transcription": "",
+            "response": sem_fala,
+            "tools_executed": [],
+            "has_audio": False,
+            "audio_url": "",
+            "played_locally": False,
+        }
+
+    from core.assistant_pipeline import processar_comando
+
+    res = await processar_comando(
+        texto=texto_usuario,
+        origem="chat",
+        profile=profile,
+        provider=provider,
+        use_memory=True,
+        generate_speech=True,
+        tocar_local=False,
+        broadcast_fn=manager.broadcast,
+        buscar_contexto_fn=buscar_contexto,
+        buscar_conhecimento_fn=buscar_conhecimento,
+        ask_fryvis_fn=ask_fryvis,
+        salvar_memoria_fn=salvar_memoria,
+        falar_fn=falar,
+    )
+    return {
+        "command_id": res.get("command_id"),
+        "transcription": texto_usuario,
+        "user_message": texto_usuario,
+        "response": res["response"],
+        "tools_executed": res["tools_executed"],
+        "has_audio": res["has_audio"],
+        "audio_url": res["audio_url"],
+        "played_locally": False,
+    }
+
+
+_ALLOWED_WORKSPACE_EXTS = {".xlsx", ".xlsm", ".csv", ".docx", ".txt", ".md", ".json", ".pdf"}
+
+
+@app.get("/api/files")
+def list_workspace_files(
+    _e2ee: E2EESessionRecord | None = Depends(require_e2ee_session),
+) -> dict[str, Any]:
+    """Lista planilhas e documentos disponíveis no workspace da F.R.Y.I.Vs."""
+    from pathlib import Path
+    from urllib.parse import quote
+
+    ws = get_files_workspace_dir()
+    items = []
+    for f in sorted(ws.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+        if f.is_file() and f.suffix.lower() in _ALLOWED_WORKSPACE_EXTS:
+            st = f.stat()
+            items.append(
+                {
+                    "name": f.name,
+                    "size_bytes": st.st_size,
+                    "updated_at": st.st_mtime,
+                    "download_url": f"/api/files/download/{quote(f.name)}",
+                }
+            )
+    return {"files": items[:60]}
+
+
+@app.get("/api/files/download/{filename}")
+def download_workspace_file(
+    filename: str,
+    _e2ee: E2EESessionRecord | None = Depends(require_e2ee_session),
+) -> Any:
+    """Baixa de forma segura um arquivo gerado (.xlsx, .docx, etc.) sem risco de path traversal."""
+    from pathlib import Path
+
+    safe_name = Path(filename).name
+    if not safe_name or safe_name != filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Nome de arquivo inválido.")
+
+    ws = get_files_workspace_dir().resolve()
+    target = (ws / safe_name).resolve()
+    if target.parent != ws or not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado.")
+
+    return FileResponse(
+        str(target),
+        filename=safe_name,
+        media_type="application/octet-stream",
+    )
+
+
+@app.post("/api/files/upload")
+async def upload_workspace_file(
+    request: Request,
+    filename: str = Query(..., min_length=1, max_length=140),
+    _e2ee: E2EESessionRecord | None = Depends(require_e2ee_session),
+) -> dict[str, Any]:
+    """Permite enviar uma planilha .xlsx/.csv ou documento .docx pelo navegador para análise/edição."""
+    import re as _re
+    from pathlib import Path
+
+    base_name = Path(filename).name
+    clean_name = _re.sub(r"[^A-Za-z0-9._ -]", "_", base_name).strip()
+    ext = Path(clean_name).suffix.lower()
+    if not clean_name or ext not in _ALLOWED_WORKSPACE_EXTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Formato não permitido ({ext}). Use: .xlsx, .csv, .docx, .txt ou .md.",
+        )
+
+    content = await request.body()
+    if not content:
+        raise HTTPException(status_code=400, detail="Arquivo enviado está vazio.")
+    if len(content) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Arquivo excede 20 MB.")
+
+    ws = get_files_workspace_dir()
+    dest = (ws / clean_name).resolve()
+    dest.write_bytes(content)
+
+    try:
+        from core.session_state import registrar_artefato
+
+        if ext in (".xlsx", ".xlsm", ".csv"):
+            registrar_artefato("excel", caminho=str(dest))
+        elif ext == ".docx":
+            registrar_artefato("word", caminho=str(dest))
+    except Exception:
+        pass
+
+    return {
+        "uploaded": True,
+        "name": clean_name,
+        "size_bytes": len(content),
     }
 
 

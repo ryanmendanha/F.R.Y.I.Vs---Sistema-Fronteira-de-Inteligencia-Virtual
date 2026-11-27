@@ -28,6 +28,7 @@ ddgs
 cryptography>=42.0.0
 openwakeword @ git+https://github.com/dscripka/openWakeWord.git
 edge-tts
+pyttsx3
 pywin32
 psutil
 networkx

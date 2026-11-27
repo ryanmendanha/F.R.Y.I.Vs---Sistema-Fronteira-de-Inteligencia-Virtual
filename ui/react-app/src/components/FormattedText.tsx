@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Check, Copy } from "lucide-react";
+import { Icons8Icon } from "@/components/Icons8Icon";
 
 interface FormattedTextProps {
   content: string;
@@ -9,7 +9,7 @@ interface FormattedTextProps {
 
 function renderInline(text: string): React.ReactNode[] {
   const tokens = text.split(
-    /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\(https?:\/\/[^)\s]+\)|https?:\/\/[^\s<)]+)/g,
+    /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\((?:https?:\/\/|\/api\/files\/download\/)[^)\s]+\)|https?:\/\/[^\s<)]+)/g,
   );
   return tokens.map((tok, idx) => {
     if (!tok) return null;
@@ -28,6 +28,27 @@ function renderInline(text: string): React.ReactNode[] {
         <strong key={idx} className="font-semibold text-white">
           {tok.slice(2, -2)}
         </strong>
+      );
+    }
+    const mdDownload = /^\[([^\]]+)\]\((\/api\/files\/download\/[^)\s]+)\)$/.exec(tok);
+    if (mdDownload) {
+      let href = mdDownload[2];
+      try {
+        const e2eeTok = sessionStorage.getItem("fryivs_e2ee_session_token");
+        if (e2eeTok) {
+          href += `${href.includes("?") ? "&" : "?"}e2ee_token=${encodeURIComponent(e2eeTok)}`;
+        }
+      } catch {}
+      return (
+        <a
+          key={idx}
+          href={href}
+          download
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 my-0.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/45 text-emerald-200 font-semibold text-[11.5px] no-underline transition-all"
+        >
+          <Icons8Icon name="file-text" className="w-3.5 h-3.5 text-emerald-300" />
+          {mdDownload[1]}
+        </a>
       );
     }
     const mdLink = /^\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)$/.exec(tok);
@@ -80,7 +101,11 @@ function CodeFenceBlock({ lang, code }: { lang: string; code: string }) {
           onClick={handleCopy}
           className="inline-flex items-center gap-1 text-slate-400 hover:text-cyan-300 transition-colors cursor-pointer"
         >
-          {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+          {copied ? (
+            <Icons8Icon name="check" className="w-3 h-3 text-emerald-400" />
+          ) : (
+            <Icons8Icon name="copy" className="w-3 h-3" />
+          )}
           {copied ? "Copiado" : "Copiar"}
         </button>
       </div>

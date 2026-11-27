@@ -848,6 +848,9 @@ class AgentOrchestrator:
             raise ValueError(f"Perfil Hermes inválido: '{profile}'. Perfis válidos: {valid}.")
         return normalized
 
+    def set_event_broadcaster(self, fn: Callable[[dict[str, Any]], Any] | None) -> None:
+        self._on_event = fn
+
     def _emit_event(self, event_type: str, payload: dict[str, Any]) -> None:
         if self._on_event is None:
             return
@@ -862,6 +865,56 @@ class AgentOrchestrator:
                     res.close()
         except Exception:
             pass
+
+    def emit_office_command(
+        self,
+        action: str,
+        *,
+        profile: str | None = None,
+        activity: str | None = None,
+        view_mode: str | None = None,
+    ) -> dict[str, Any]:
+        norm_profile = self.validate_profile(profile) if profile else None
+        payload: dict[str, Any] = {
+            "action": action,
+            "profile": norm_profile,
+            "activity": activity,
+            "view_mode": view_mode,
+        }
+        self._emit_event("agent_office_command", payload)
+        return payload
+
+    def resolve_target_job(
+        self,
+        *,
+        job_id: str | None = None,
+        profile: str | None = None,
+        only_completed: bool = False,
+        only_active: bool = False,
+    ) -> AgentJob | None:
+        if job_id and job_id.strip():
+            clean_id = job_id.strip().lstrip("#")
+            with self._lock:
+                exact = self._jobs.get(clean_id)
+                if exact is not None:
+                    return exact
+                for candidate in self._jobs.values():
+                    if candidate.job_id.startswith(clean_id):
+                        return candidate
+            return None
+
+        norm_profile = self.validate_profile(profile) if profile else None
+        active_statuses = {"queued", "running", "awaiting_approval"}
+        jobs = self.list_jobs(limit=100)
+        for job in jobs:
+            if norm_profile and job.profile != norm_profile:
+                continue
+            if only_completed and (job.status != "completed" or not job.result.strip()):
+                continue
+            if only_active and job.status not in active_statuses:
+                continue
+            return job
+        return None
 
     def _publish_redis_stream(self, event_type: str, payload: dict[str, Any]) -> bool:
         """Publica job/evento opcionalmente em Redis Streams se `REDIS_URL` estiver configurado."""

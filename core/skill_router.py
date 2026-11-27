@@ -340,32 +340,59 @@ SKILL_SEMANTIC_PROFILES: Final[dict[str, dict[str, str]]] = {
         )
     },
     "delegar_missao_hermes": {
-        "description": "Delega uma missão longa ou especializada em segundo plano para um subagente especialista (pesquisador, organizador, ideias ou engenheiro).",
+        "description": "Delega uma missão em segundo plano para um dos 4 agentes especialistas (pesquisador, organizador, ideias ou engenheiro).",
         "intents": (
-            "delegar missao hermes delegar tarefa para agente acionar subagente "
-            "mandar agente pesquisador organizador de dados ideias engenheiro executar em segundo plano "
-            "orquestrar subagente delegate agent mission"
+            "delegar missao delegar tarefa para agente acionar agente mandar o pesquisador "
+            "mande o pesquisador pedir pro pesquisador mandar o organizador de dados "
+            "pedir ideias pro agente de ideias mandar o engenheiro auditar "
+            "coloca o agente pra trabalhar em segundo plano delegate agent mission"
         )
     },
     "consultar_status_agentes": {
-        "description": "Consulta o status das missões delegadas aos subagentes Hermes, consumo do Budget Guard (tokens/USD, concorrência) e aprovações Tier 3 pendentes.",
+        "description": "Consulta o andamento das missões e lê o resultado concluído de qualquer agente (pesquisador, organizador, ideias ou engenheiro).",
         "intents": (
-            "consultar status agentes status dos agentes status do hermes como estao os agentes "
-            "missoes em andamento orcamento budget guard aprovacoes pendentes tier 3 check agent status"
+            "consultar status agentes como estao os agentes o que o pesquisador descobriu "
+            "qual o resultado do agente resultado do pesquisador resultado do agente de ideias "
+            "missoes em andamento progresso dos agentes check agent status"
+        )
+    },
+    "curar_resultado_agente": {
+        "description": "Indexa na Base de Conhecimento da IA ('indexar') ou descarta ('descartar') a pesquisa ou resultado de um agente.",
+        "intents": (
+            "indexar pesquisa na base de conhecimento salvar pesquisa do agente na base "
+            "indexe o resultado do pesquisador guardar na memoria da ia indexar conhecimento "
+            "descartar pesquisa do agente descartar resultado apagar missao concluida"
+        )
+    },
+    "controlar_escritorio_agentes": {
+        "description": "Abre ou fecha o Escritório 3D dos Agentes na tela, foca em um agente, ativa festa ou coloca os agentes em atividades (café, ping-pong, videogame, banda, dança).",
+        "intents": (
+            "abrir escritorio dos agentes mostrar escritorio 3d abrir area dos agentes "
+            "fechar escritorio dos agentes focar no pesquisador focar no engenheiro "
+            "fazer festa no escritorio festa nos agentes mandar agentes tomarem cafe "
+            "jogar ping pong tocar na banda dancar no escritorio"
         )
     },
     "cancelar_missao_agente": {
-        "description": "Cancela uma missão específica do Hermes Agent ou aciona o Kill-Switch de emergência para encerrar todos os agentes ativos.",
+        "description": "Cancela a missão em execução de um agente (pesquisador, organizador, ideias, engenheiro) ou aciona o Kill-Switch global.",
         "intents": (
-            "cancelar missao agente cancelar job hermes parar agente encerrar agentes "
-            "kill switch kill all abortar missao subagente cancel agent job"
+            "cancelar missao agente parar o pesquisador parar o engenheiro parar agente "
+            "encerrar agentes kill switch kill all abortar missao cancel agent job"
         )
     },
     "listar_perfis_hermes": {
-        "description": "Lista os 4 perfis especialistas do Hermes Agent (pesquisador, engenheiro, analista e sentinela), suas ferramentas e sandboxes.",
+        "description": "Lista os 4 agentes especialistas da F.R.Y.I.Vs (pesquisador, organizador, ideias e engenheiro).",
         "intents": (
-            "listar perfis hermes quais perfis hermes quais subagentes existem "
-            "mostrar agentes especialistas perfis disponiveis hermes list hermes profiles"
+            "listar agentes quais agentes existem quais sao os seus agentes "
+            "mostrar agentes especialistas equipe de agentes list agent profiles"
+        )
+    },
+    "configurar_ativacao_palmas": {
+        "description": "Ativa, desativa, consulta o status ou calibra a sensibilidade ('baixa', 'media', 'alta') do despertar da IA ao ouvir duas palmas (Clap on Jarvis).",
+        "intents": (
+            "ativar duas palmas ativar palmas acordar com duas palmas despertar com palmas "
+            "desativar palmas desligar duas palmas sensibilidade das palmas calibrar palmas "
+            "clap on jarvis status das palmas bater palmas para acordar"
         )
     },
 }
@@ -594,33 +621,48 @@ SKILL_KEYWORD_RULES: Final[dict[str, list[str]]] = {
     ],
     "delegar_missao_hermes": [
         "delegar missao", "delegue a missao", "delegue uma missao", "delegar tarefa",
-        "delegue a tarefa", "delegar para o hermes", "delegar ao hermes", "delegar para agente",
-        "delegar ao agente", "mandar o hermes", "mande o hermes", "pedir ao hermes",
-        "acionar hermes", "acionar subagente", "subagente pesquisador", "subagente engenheiro",
-        "subagente analista", "subagente sentinela", "agente pesquisador", "agente engenheiro",
-        "agente analista", "agente sentinela", "perfil pesquisador", "perfil engenheiro",
-        "perfil analista", "perfil sentinela", "missao hermes", "missao para o hermes",
-        "delegar para o pesquisador", "delegar para o engenheiro",
-        "delegar para o analista", "delegar para o sentinela"
+        "delegue a tarefa", "delegar para agente", "delegar ao agente",
+        "mande o pesquisador", "mandar o pesquisador", "pede pro pesquisador", "peca ao pesquisador",
+        "mande o organizador", "mandar o organizador", "pede pro organizador",
+        "mande o engenheiro", "mandar o engenheiro", "pede pro engenheiro",
+        "agente de ideias", "pede ideias", "agente pesquisador", "agente organizador",
+        "agente engenheiro", "delegar para o pesquisador", "delegar para o organizador",
+        "delegar para o engenheiro", "delegar para ideias", "coloca o agente", "coloque o agente"
     ],
     "consultar_status_agentes": [
-        "status dos agentes", "status de agentes", "status do hermes", "status hermes",
-        "consultar agentes", "consultar status dos agentes", "como estao os agentes",
+        "status dos agentes", "status de agentes", "consultar agentes", "como estao os agentes",
         "agentes ativos", "missoes ativas", "missoes em andamento", "orcamento dos agentes",
-        "budget guard", "budget dos agentes", "aprovacoes pendentes", "aprovacoes tier 3",
-        "status da missao", "progresso do agente", "progresso da missao"
+        "o que o pesquisador descobriu", "resultado do pesquisador", "resultado do organizador",
+        "resultado do engenheiro", "resultado do agente de ideias", "progresso do agente"
+    ],
+    "curar_resultado_agente": [
+        "indexar pesquisa", "indexe a pesquisa", "indexar resultado", "indexe o resultado",
+        "indexar na base", "indexe na base", "salvar na base de conhecimento",
+        "salve a pesquisa", "guardar na base", "descartar pesquisa", "descarte a pesquisa",
+        "descartar resultado", "descarte o resultado", "descartar missao"
+    ],
+    "controlar_escritorio_agentes": [
+        "escritorio dos agentes", "escritorio 3d", "abra o escritorio", "abrir escritorio",
+        "feche o escritorio", "fechar escritorio", "area dos agentes", "abra os agentes",
+        "foca no pesquisador", "foque no pesquisador", "foca no engenheiro", "foca no organizador",
+        "festa nos agentes", "festa no escritorio", "modo festa",
+        "tomar cafe", "jogar ping pong", "ping-pong", "tocar na banda", "jogar videogame"
     ],
     "cancelar_missao_agente": [
         "cancelar missao", "cancele a missao", "cancelar agente", "cancele o agente",
-        "cancelar job", "cancele o job", "parar agente", "pare o agente",
-        "parar agentes", "pare os agentes", "encerrar agentes", "encerre os agentes",
-        "encerrar todos os agentes", "matar agentes", "kill switch", "kill-switch",
-        "kill all", "abortar missao", "aborte a missao", "abortar agente"
+        "parar o pesquisador", "pare o pesquisador", "parar o engenheiro", "pare o engenheiro",
+        "parar o organizador", "parar agente", "pare o agente", "parar agentes", "pare os agentes",
+        "encerrar agentes", "encerre os agentes", "kill switch", "kill-switch", "kill all", "abortar missao"
     ],
     "listar_perfis_hermes": [
-        "listar perfis hermes", "perfis hermes", "perfis do hermes", "quais perfis",
-        "perfis de agentes", "perfis especialistas", "quais agentes", "quais subagentes",
-        "listar agentes", "listar subagentes", "agentes disponiveis", "subagentes disponiveis"
+        "quais agentes", "quais subagentes", "listar agentes", "agentes disponiveis",
+        "equipe de agentes", "quais sao seus agentes", "perfis de agentes"
+    ],
+    "configurar_ativacao_palmas": [
+        "duas palmas", "bater palmas", "ativar palmas", "ative as palmas",
+        "desativar palmas", "desative as palmas", "desligar palmas",
+        "sensibilidade das palmas", "calibrar palmas", "acordar com palmas",
+        "clap on jarvis", "status das palmas"
     ],
 }
 
@@ -1448,17 +1490,24 @@ class SkillRouter:
         except Exception as e:
             print(f"[SkillRouter] Erro na busca semântica de skills: {e}")
 
+        from core.runtime_mode import filter_active_skill_schemas, is_skill_allowed_in_mode, is_web_mode
+        if is_web_mode():
+            if any(s in matched_names for s in ("pesquisar_google", "pesquisar_na_web", "pesquisar_youtube")):
+                if "pesquisar_informacao_web" not in matched_names:
+                    matched_names.insert(0, "pesquisar_informacao_web")
+
         matched_schemas = [
             self._schemas_by_name[name]
             for name in matched_names
-            if name in self._schemas_by_name
+            if name in self._schemas_by_name and is_skill_allowed_in_mode(name)
         ]
 
         return matched_schemas[:top_k]
 
     def get_all_skills(self) -> list[dict[str, Any]]:
-        """Retorna todos os esquemas cadastrados."""
-        return list(ALL_SKILL_SCHEMAS)
+        """Retorna todos os esquemas cadastrados compatíveis com o modo atual."""
+        from core.runtime_mode import filter_active_skill_schemas
+        return filter_active_skill_schemas(list(ALL_SKILL_SCHEMAS))
 
 
 _ROUTER_INSTANCE: SkillRouter | None = None

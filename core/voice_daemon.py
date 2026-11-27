@@ -29,6 +29,7 @@ from typing import Any, Awaitable, Callable
 import numpy as np
 
 from core import audio_player
+from core.clap_detector import ClapDetector, get_clap_detector
 from core.openwakeword_detector import OpenWakeWordDetector, obter_detector_openwakeword
 from core.overlay import status_overlay
 from core.stt import CHUNK_SIZE, SAMPLE_RATE, _rms, _trim_silence, eh_alucinacao_whisper, transcrever
@@ -76,6 +77,8 @@ class VoiceDaemon:
         usar_openwakeword: bool | None = None,
         limiar_inicial: float = 0.045,
         transcrever_interrupcao_fn: Callable[[np.ndarray], str] | None = None,
+        clap_detector: ClapDetector | None = None,
+        usar_clap: bool | None = None,
     ) -> None:
         self.estado: str = "DORMINDO"
         self.historico_estados: list[str] = ["DORMINDO"]
@@ -99,6 +102,13 @@ class VoiceDaemon:
         )
         self._oww_wake_no_segmento: bool = False
         self._oww_max_score_segmento: float = 0.0
+
+        if usar_clap is None:
+            usar_clap = (not _em_teste()) or (clap_detector is not None)
+        self._usar_clap: bool = bool(usar_clap)
+        self._clap_detector: ClapDetector | None = (
+            clap_detector if clap_detector is not None else (get_clap_detector() if self._usar_clap else None)
+        )
 
         self._chunks_fala: list[np.ndarray] = []
         self._pre_roll: collections.deque[np.ndarray] = collections.deque(maxlen=3)
@@ -428,6 +438,25 @@ class VoiceDaemon:
                 self.limiar_rms = max(0.040, min(0.085, piso * 3.8))
 
         if self.estado == "DORMINDO":
+            if (
+                self._usar_clap
+                and self._clap_detector is not None
+                and self._chunks_voz_ativa <= 2
+            ):
+                bateu_duas_palmas, _ = self._clap_detector.process_chunk(
+                    flat, ambient_rms=self.limiar_rms
+                )
+                if bateu_duas_palmas:
+                    if self._oww_detector is not None:
+                        self._oww_detector.reset()
+                    self._resetar_captura()
+                    self._pre_roll.clear()
+                    self._notificar(
+                        {"type": "clap_detected", "count": 2, **self._clap_detector.status()}
+                    )
+                    self._entrar_modo_senhor()
+                    return
+
             oww_ativou = False
             oww_score = 0.0
             if self._oww_detector is not None and self._oww_detector.disponivel:
@@ -599,6 +628,11 @@ def _notificar_ws(evento: dict[str, Any]) -> None:
             pass
 
 
+def notificar_evento_externo(evento: dict[str, Any]) -> None:
+    """Permite publicar eventos de configuração (ex.: clap_config) no WebSocket ativo."""
+    _notificar_ws(evento)
+
+
 def _executar_no_pipeline(texto: str):
     if _event_loop is None:
         return
@@ -749,6 +783,7 @@ def status() -> dict[str, Any]:
         "state": _daemon_instance.estado if _daemon_instance else "INATIVO",
         "threshold_rms": round(_daemon_instance.limiar_rms, 4) if _daemon_instance else 0.0,
         "openwakeword": oww_info,
+        "clap": get_clap_detector().status(),
     }
 
 

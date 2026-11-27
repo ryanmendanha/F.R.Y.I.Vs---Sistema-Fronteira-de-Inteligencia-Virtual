@@ -1,15 +1,6 @@
 import React, { useEffect, useState } from "react";
-import {
-  ShieldAlert,
-  ShieldCheck,
-  Lock,
-  KeyRound,
-  Eye,
-  EyeOff,
-  Loader2,
-  Cpu,
-  VolumeX,
-} from "lucide-react";
+import { Icons8Icon } from "@/components/Icons8Icon";
+import AnimatedGradient from "@/registry/spell-ui/animated-gradient";
 import {
   E2EEAuthError,
   performE2EEUnlock,
@@ -76,10 +67,10 @@ export const E2EELockGate: React.FC<E2EELockGateProps> = ({
       aria-modal="true"
       aria-labelledby="e2ee-gate-title"
     >
-      {/* Brilhos ambientais futuristas */}
-      <div className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="absolute -top-32 left-1/2 -translate-x-1/2 w-[540px] h-[540px] rounded-full bg-cyan-500/10 blur-[140px]" />
-        <div className="absolute -bottom-40 right-1/4 w-[420px] h-[420px] rounded-full bg-blue-600/12 blur-[130px]" />
+      {/* Efeito Spell UI AnimatedGradient (Prism) ao fundo do Cofre E2EE */}
+      <div className="pointer-events-none fixed inset-0 overflow-hidden opacity-55">
+        <AnimatedGradient style={{ zIndex: 0 }} config={{ preset: "Prism", speed: 22 }} noise={{ opacity: 0.08 }} />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_45%,transparent_12%,#02060f_82%)]" />
       </div>
 
       <div className="relative w-full max-w-md rounded-3xl border border-cyan-400/25 bg-[#050b18]/90 shadow-[0_0_80px_rgba(6,182,212,0.18)] backdrop-blur-3xl p-7 text-slate-200">
@@ -87,10 +78,10 @@ export const E2EELockGate: React.FC<E2EELockGateProps> = ({
         <div className="flex flex-col items-center text-center mb-6">
           <div className="relative mb-4">
             <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-cyan-500/20 to-blue-600/20 border border-cyan-400/40 flex items-center justify-center shadow-[0_0_30px_rgba(34,211,238,0.28)]">
-              <Lock className="w-7 h-7 text-cyan-300" />
+              <Icons8Icon name="lock" className="w-7 h-7 text-cyan-300" />
             </div>
             <span className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-[#050b18] border border-cyan-400/50">
-              <ShieldCheck className="w-3 h-3 text-emerald-400" />
+              <Icons8Icon name="shield-check" className="w-3 h-3 text-emerald-400" />
             </span>
           </div>
 
@@ -115,7 +106,7 @@ export const E2EELockGate: React.FC<E2EELockGateProps> = ({
 
         {/* Aviso de bloqueio rígido */}
         <div className="mb-5 rounded-2xl bg-red-500/8 border border-red-400/25 px-3.5 py-2.5 flex items-start gap-2.5 text-[11px] leading-relaxed text-red-200/90">
-          <VolumeX className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+          <Icons8Icon name="volume-mute" className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
           <span>
             <strong className="text-red-300">Fala, escuta e comandos bloqueados.</strong>{" "}
             A F.R.Y.I.Vs permanece em silêncio absoluto (TTS, Wake Word, Chat e WebSocket) até o desbloqueio E2EE.
@@ -141,7 +132,7 @@ export const E2EELockGate: React.FC<E2EELockGateProps> = ({
               htmlFor="e2ee-password-input"
               className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-widest text-slate-400 font-semibold mb-2"
             >
-              <KeyRound className="w-3.5 h-3.5 text-cyan-400" />
+              <Icons8Icon name="key" className="w-3.5 h-3.5 text-cyan-400" />
               Senha de Acesso Neural
             </label>
 
@@ -164,16 +155,20 @@ export const E2EELockGate: React.FC<E2EELockGateProps> = ({
                 type="button"
                 onClick={() => setShowPassword((prev) => !prev)}
                 aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
-                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-500 hover:text-cyan-300 transition-colors"
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-500 hover:text-cyan-300 transition-colors cursor-pointer"
               >
-                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                {showPassword ? (
+                  <Icons8Icon name="eye-off" className="w-4 h-4" />
+                ) : (
+                  <Icons8Icon name="eye" className="w-4 h-4" />
+                )}
               </button>
             </div>
           </div>
 
           {error && (
             <div className="rounded-xl bg-red-500/10 border border-red-500/30 px-3.5 py-2.5 text-xs text-red-300 flex items-start gap-2">
-              <ShieldAlert className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+              <Icons8Icon name="shield-alert" className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
               <span>{error}</span>
             </div>
           )}
@@ -191,12 +186,12 @@ export const E2EELockGate: React.FC<E2EELockGateProps> = ({
           >
             {loading ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Icons8Icon name="loader" className="w-4 h-4 animate-spin" />
                 Negociando Chaves E2EE...
               </>
             ) : (
               <>
-                <ShieldCheck className="w-4 h-4" />
+                <Icons8Icon name="shield-check" className="w-4 h-4" />
                 Desbloquear F.R.Y.I.Vs
               </>
             )}
@@ -206,7 +201,7 @@ export const E2EELockGate: React.FC<E2EELockGateProps> = ({
         {/* Nota técnica */}
         <div className="mt-5 pt-4 border-t border-white/8 text-[10px] font-mono text-slate-500 space-y-1.5">
           <div className="flex items-center gap-1.5 text-slate-400">
-            <Cpu className="w-3 h-3 text-cyan-400 shrink-0" />
+            <Icons8Icon name="cpu" className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
             <span>A senha é cifrada localmente via WebCrypto antes de sair do navegador.</span>
           </div>
           {!hasPasswordConfigured && (

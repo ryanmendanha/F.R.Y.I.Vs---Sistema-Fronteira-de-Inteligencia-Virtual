@@ -34,11 +34,13 @@ if TYPE_CHECKING:
     from chromadb.api import ClientAPI
     from chromadb.api.models.Collection import Collection
 
+from core.runtime_mode import get_chroma_dir
+
 _CHROMA_CLIENTS: dict[str, ClientAPI] = {}
 _CHROMA_CLIENT: ClientAPI | None = None
 _COLLECTIONS_CACHE: dict[str, Any] = {}
 _CLIENT_LOCK = threading.Lock()
-DEFAULT_DB_PATH: str = os.path.abspath("fryvis_memory")
+DEFAULT_DB_PATH: str = str(get_chroma_dir())
 
 HNSW_DEFAULT_METADATA: dict[str, Any] = {
     "hnsw:space": "cosine",

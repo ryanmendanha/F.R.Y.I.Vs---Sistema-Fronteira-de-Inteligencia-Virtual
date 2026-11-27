@@ -1,26 +1,15 @@
 import React, { useState, useRef, useEffect } from "react";
-import {
-  Activity,
-  BookOpen,
-  Bot,
-  Camera,
-  Lock,
-  Maximize2,
-  MessageSquare,
-  Minimize2,
-  Monitor,
-  MonitorUp,
-  Orbit,
-  Sliders,
-  Tv,
-  Volume2,
-  VolumeX,
-} from "lucide-react";
+import { Icons8Icon, type Icons8Name } from "@/components/Icons8Icon";
 import type { AIOrbModel, AIOrbState } from "@/components/AIOrb/types";
+import type { PresetName } from "@/registry/spell-ui/animated-gradient";
+
+export type GradientModeOption = "auto" | PresetName | "off";
 
 export interface CommandRailProps {
   orbModel: AIOrbModel;
   onOrbModelChange: (model: AIOrbModel) => void;
+  gradientMode?: GradientModeOption;
+  onGradientModeChange?: (mode: GradientModeOption) => void;
   isFullScreenOrb: boolean;
   onToggleFullScreen: () => void;
   agentsOpen: boolean;
@@ -41,11 +30,14 @@ export interface CommandRailProps {
   e2eeRequired: boolean;
   e2eeUnlocked: boolean;
   onLockAI: () => void;
+  isWebMode?: boolean;
 }
 
 export const CommandRail: React.FC<CommandRailProps> = ({
   orbModel,
   onOrbModelChange,
+  gradientMode = "auto",
+  onGradientModeChange,
   isFullScreenOrb,
   onToggleFullScreen,
   agentsOpen,
@@ -66,6 +58,7 @@ export const CommandRail: React.FC<CommandRailProps> = ({
   e2eeRequired,
   e2eeUnlocked,
   onLockAI,
+  isWebMode = false,
 }) => {
   const [toolsMenuOpen, setToolsMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -90,6 +83,34 @@ export const CommandRail: React.FC<CommandRailProps> = ({
 
   const railBtnBase =
     "relative group w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-200 cursor-pointer border";
+
+  const quickShortcuts: { onClick: () => void; icon: Icons8Name; title: string }[] = [
+    {
+      onClick: () => onExecuteSkill("listar_janelas"),
+      icon: "monitor",
+      title: "Listar Janelas",
+    },
+    {
+      onClick: () => onExecuteSkill("tirar_screenshot"),
+      icon: "camera",
+      title: "Capturar Tela",
+    },
+    {
+      onClick: () => onExecuteSkill("controlar_volume", { acao: "mutar" }),
+      icon: "volume-mute",
+      title: "Mutar Áudio",
+    },
+    {
+      onClick: () => onExecuteSkill("controlar_volume", { acao: "aumentar" }),
+      icon: "volume-up",
+      title: "Volume +",
+    },
+    {
+      onClick: () => onExecuteSkill("pressionar_atalho", { teclas: ["win", "d"] }),
+      icon: "desktop",
+      title: "Mostrar Desktop",
+    },
+  ];
 
   return (
     <aside
@@ -130,7 +151,7 @@ export const CommandRail: React.FC<CommandRailProps> = ({
                 : "bg-white/[0.03] border-white/8 text-slate-400 hover:text-cyan-200 hover:border-cyan-400/35 hover:bg-cyan-500/10"
             }`}
           >
-            <Bot className="w-[18px] h-[18px]" />
+            <Icons8Icon name="bot" className="w-[19px] h-[19px]" />
             {agentsBadgeCount > 0 && (
               <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-cyan-400 text-slate-950 font-mono font-bold text-[9px] flex items-center justify-center shadow">
                 {agentsBadgeCount > 9 ? "9+" : agentsBadgeCount}
@@ -150,26 +171,28 @@ export const CommandRail: React.FC<CommandRailProps> = ({
                 : "bg-white/[0.03] border-white/8 text-slate-400 hover:text-emerald-200 hover:border-emerald-400/35 hover:bg-emerald-500/10"
             }`}
           >
-            <BookOpen className="w-[18px] h-[18px]" />
+            <Icons8Icon name="book-open" className="w-[19px] h-[19px]" />
             {kbChunksCount > 0 && (
               <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400 ring-2 ring-[#040914]" />
             )}
           </button>
 
-          {/* 3. Tela ao Vivo (Desktop Stream) */}
-          <button
-            type="button"
-            onClick={onToggleLiveScreen}
-            aria-label="Alternar Tela ao Vivo"
-            title="Tela ao Vivo (espelhamento em tempo real da área de trabalho)"
-            className={`${railBtnBase} ${
-              liveScreenActive
-                ? "bg-blue-500/20 border-blue-400/55 text-blue-200 shadow-[0_0_14px_rgba(59,130,246,0.22)]"
-                : "bg-white/[0.03] border-white/8 text-slate-400 hover:text-blue-200 hover:border-blue-400/35 hover:bg-blue-500/10"
-            }`}
-          >
-            <Tv className="w-[18px] h-[18px]" />
-          </button>
+          {/* 3. Tela ao Vivo (apenas no modo Desktop Windows) */}
+          {!isWebMode && (
+            <button
+              type="button"
+              onClick={onToggleLiveScreen}
+              aria-label="Alternar Tela ao Vivo"
+              title="Tela ao Vivo (espelhamento em tempo real da área de trabalho)"
+              className={`${railBtnBase} ${
+                liveScreenActive
+                  ? "bg-blue-500/20 border-blue-400/55 text-blue-200 shadow-[0_0_14px_rgba(59,130,246,0.22)]"
+                  : "bg-white/[0.03] border-white/8 text-slate-400 hover:text-blue-200 hover:border-blue-400/35 hover:bg-blue-500/10"
+              }`}
+            >
+              <Icons8Icon name="live-tv" className="w-[19px] h-[19px]" />
+            </button>
+          )}
 
           {/* 4. Alternar Modo Visual do Orbe */}
           <button
@@ -181,13 +204,13 @@ export const CommandRail: React.FC<CommandRailProps> = ({
             title={`Geometria do Orbe: ${orbModel === "orbital-hud" ? "Orbital HUD" : "Neural Fibonacci"}`}
             className={`${railBtnBase} bg-white/[0.03] border-white/8 text-slate-400 hover:text-white hover:border-white/25 hover:bg-white/8`}
           >
-            <Orbit className="w-[18px] h-[18px]" />
+            <Icons8Icon name="orbit" className="w-[19px] h-[19px]" />
             <span className="absolute -bottom-1 px-1 rounded bg-[#091224] border border-white/15 text-[7px] font-mono text-cyan-300 uppercase">
               {orbModel === "orbital-hud" ? "HUD" : "FIB"}
             </span>
           </button>
 
-          {/* 5. Controles de Sistema & Diagnóstico (Popover limpo) */}
+          {/* 5. Controles de Sistema & Diagnóstico */}
           <div ref={menuRef} className="relative">
             <button
               type="button"
@@ -201,60 +224,36 @@ export const CommandRail: React.FC<CommandRailProps> = ({
                   : "bg-white/[0.03] border-white/8 text-slate-400 hover:text-amber-200 hover:border-amber-400/35 hover:bg-amber-500/10"
               }`}
             >
-              <Sliders className="w-[18px] h-[18px]" />
+              <Icons8Icon name="sliders" className="w-[19px] h-[19px]" />
             </button>
 
             {toolsMenuOpen && (
               <div className="absolute left-14 top-0 w-64 rounded-2xl bg-[#060d1d]/97 border border-white/12 shadow-2xl backdrop-blur-3xl p-3.5 space-y-3 z-50">
-                <div>
-                  <p className="text-[10px] font-mono uppercase tracking-widest text-cyan-300 font-semibold mb-2">
-                    Atalhos Rápidos Windows
-                  </p>
-                  <div className="grid grid-cols-5 gap-1.5">
-                    {[
-                      {
-                        onClick: () => onExecuteSkill("listar_janelas"),
-                        icon: <Monitor size={15} />,
-                        title: "Listar Janelas",
-                      },
-                      {
-                        onClick: () => onExecuteSkill("tirar_screenshot"),
-                        icon: <Camera size={15} />,
-                        title: "Capturar Tela",
-                      },
-                      {
-                        onClick: () => onExecuteSkill("controlar_volume", { acao: "mutar" }),
-                        icon: <VolumeX size={15} />,
-                        title: "Mutar Áudio",
-                      },
-                      {
-                        onClick: () => onExecuteSkill("controlar_volume", { acao: "aumentar" }),
-                        icon: <Volume2 size={15} />,
-                        title: "Volume +",
-                      },
-                      {
-                        onClick: () => onExecuteSkill("pressionar_atalho", { teclas: ["win", "d"] }),
-                        icon: <MonitorUp size={15} />,
-                        title: "Mostrar Desktop",
-                      },
-                    ].map((btn, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => {
-                          btn.onClick();
-                          setToolsMenuOpen(false);
-                        }}
-                        title={btn.title}
-                        className="h-9 rounded-lg bg-white/[0.04] hover:bg-cyan-500/15 border border-white/8 hover:border-cyan-400/35 flex items-center justify-center text-slate-300 hover:text-cyan-200 transition-colors cursor-pointer"
-                      >
-                        {btn.icon}
-                      </button>
-                    ))}
+                {!isWebMode && (
+                  <div>
+                    <p className="text-[10px] font-mono uppercase tracking-widest text-cyan-300 font-semibold mb-2">
+                      Atalhos Rápidos Windows
+                    </p>
+                    <div className="grid grid-cols-5 gap-1.5">
+                      {quickShortcuts.map((btn, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => {
+                            btn.onClick();
+                            setToolsMenuOpen(false);
+                          }}
+                          title={btn.title}
+                          className="h-9 rounded-lg bg-white/[0.04] hover:bg-cyan-500/15 border border-white/8 hover:border-cyan-400/35 flex items-center justify-center text-slate-300 hover:text-cyan-200 transition-colors cursor-pointer"
+                        >
+                          <Icons8Icon name={btn.icon} size={16} />
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
 
-                <div className="pt-2.5 border-t border-white/10 space-y-2">
+                <div className={`${!isWebMode ? "pt-2.5 border-t border-white/10 " : ""}space-y-2`}>
                   <p className="text-[10px] font-mono uppercase tracking-widest text-slate-400 font-semibold">
                     Calibração do Orbe
                   </p>
@@ -279,7 +278,7 @@ export const CommandRail: React.FC<CommandRailProps> = ({
                   <div className="pt-1">
                     <div className="flex justify-between text-[10px] font-mono text-slate-400 mb-1">
                       <span className="inline-flex items-center gap-1">
-                        <Activity size={10} /> Reatividade Áudio
+                        <Icons8Icon name="activity" size={12} /> Reatividade Áudio
                       </span>
                       <span className="text-slate-200">{Math.round(audioLevel * 100)}%</span>
                     </div>
@@ -294,6 +293,33 @@ export const CommandRail: React.FC<CommandRailProps> = ({
                     />
                   </div>
                 </div>
+
+                {onGradientModeChange && (
+                  <div className="pt-2.5 border-t border-white/10 space-y-1.5">
+                    <p className="inline-flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-widest text-cyan-300 font-semibold">
+                      <Icons8Icon name="palette" size={12} />
+                      Spell UI Gradient
+                    </p>
+                    <div className="grid grid-cols-3 gap-1 font-mono text-[10px]">
+                      {(["auto", "Prism", "Pulse", "Plasma", "Vortex", "off"] as GradientModeOption[]).map(
+                        (gm) => (
+                          <button
+                            key={gm}
+                            type="button"
+                            onClick={() => onGradientModeChange(gm)}
+                            className={`px-2 py-1 rounded-lg border transition-all cursor-pointer ${
+                              gradientMode === gm
+                                ? "bg-cyan-500/20 border-cyan-400/50 text-cyan-100 font-semibold"
+                                : "bg-white/[0.03] border-white/8 text-slate-400 hover:text-white"
+                            }`}
+                          >
+                            {gm === "auto" ? "Auto" : gm === "off" ? "Off" : gm}
+                          </button>
+                        ),
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -313,7 +339,7 @@ export const CommandRail: React.FC<CommandRailProps> = ({
               : "bg-white/[0.03] border-white/8 text-slate-400 hover:text-white hover:border-white/20"
           }`}
         >
-          <MessageSquare className="w-[17px] h-[17px]" />
+          <Icons8Icon name="message" className="w-[18px] h-[18px]" />
         </button>
 
         <button
@@ -324,9 +350,9 @@ export const CommandRail: React.FC<CommandRailProps> = ({
           className={`${railBtnBase} bg-white/[0.03] border-white/8 text-slate-400 hover:text-white hover:border-white/20`}
         >
           {isFullScreenOrb ? (
-            <Minimize2 className="w-[17px] h-[17px]" />
+            <Icons8Icon name="minimize" className="w-[18px] h-[18px]" />
           ) : (
-            <Maximize2 className="w-[17px] h-[17px]" />
+            <Icons8Icon name="maximize" className="w-[18px] h-[18px]" />
           )}
         </button>
 
@@ -338,7 +364,7 @@ export const CommandRail: React.FC<CommandRailProps> = ({
             title="Bloquear IA imediatamente (encerra sessão E2EE e áudio)"
             className={`${railBtnBase} bg-red-500/14 border-red-400/35 text-red-300 hover:bg-red-500/25 hover:text-red-100`}
           >
-            <Lock className="w-[17px] h-[17px]" />
+            <Icons8Icon name="lock" className="w-[18px] h-[18px]" />
           </button>
         )}
       </div>
@@ -347,4 +373,3 @@ export const CommandRail: React.FC<CommandRailProps> = ({
 };
 
 export default CommandRail;
-

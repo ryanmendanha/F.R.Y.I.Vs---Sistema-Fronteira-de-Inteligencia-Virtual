@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import ParticleDrift from "@/components/ui/particle-drift";
+import AnimatedGradient from "@/registry/spell-ui/animated-gradient";
 import { AIOrb } from "@/components/AIOrb";
 import type { AIOrbState, AIOrbModel } from "@/components/AIOrb/types";
 import { E2EELockGate } from "@/components/E2EELockGate";
 import { AgentsControlPanel } from "@/components/AgentsControlPanel";
-import { CommandRail } from "@/components/CommandRail";
+import { CommandRail, type GradientModeOption } from "@/components/CommandRail";
 import { KnowledgeBaseDrawer } from "@/components/KnowledgeBaseDrawer";
 import { FormattedText } from "@/components/FormattedText";
 import {
@@ -20,32 +21,12 @@ import {
   type E2EESession,
 } from "@/lib/e2ee";
 import {
-  BookOpen,
-  Bot,
-  Brain,
-  Check,
-  ChevronDown,
-  ChevronRight,
-  Code2,
-  Copy,
-  Cpu,
-  FolderKanban,
-  Lightbulb,
-  MessageSquare,
-  Mic,
-  MicOff,
-  Radio,
-  Search,
-  SendHorizontal,
-  ShieldCheck,
-  Sparkles,
-  TerminalSquare,
-  Trash2,
-  User,
-  Wrench,
-  X,
-  Zap,
-} from "lucide-react";
+  BrowserClapMonitor,
+  isBrowserRecording,
+  recordBrowserUtterance,
+  stopActiveBrowserRecording,
+} from "@/lib/webVoice";
+import { Icons8Icon, type Icons8Name } from "@/components/Icons8Icon";
 
 declare global {
   interface Window {
@@ -70,7 +51,7 @@ const ENGINE_OPTIONS = [
     id: "gemini",
     label: "Gemini",
     subLabel: "Cloud",
-    icon: Sparkles,
+    icon: "sparkles" as Icons8Name,
     color: "text-amber-300",
     dotClass: "bg-amber-400",
     desc: "Google Gemini Cloud: raciocínio avançado e skills rápidas",
@@ -79,7 +60,7 @@ const ENGINE_OPTIONS = [
     id: "ollama",
     label: "Ollama",
     subLabel: "Local",
-    icon: Cpu,
+    icon: "cpu" as Icons8Name,
     color: "text-cyan-300",
     dotClass: "bg-cyan-400",
     desc: "Ollama Local: processamento privado offline",
@@ -88,7 +69,7 @@ const ENGINE_OPTIONS = [
     id: "hybrid",
     label: "Híbrido",
     subLabel: "Auto",
-    icon: Zap,
+    icon: "zap" as Icons8Name,
     color: "text-emerald-300",
     dotClass: "bg-emerald-400",
     desc: "Prioriza Gemini Cloud com failover automático para Ollama",
@@ -148,6 +129,28 @@ export default function App() {
   const [chatOpen, setChatOpen] = useState(true);
   const [wakeWordActive, setWakeWordActive] = useState(true);
   const [micMuted, setMicMuted] = useState<boolean>(false);
+  const [clapEnabled, setClapEnabled] = useState<boolean>(true);
+  const [clapFlash, setClapFlash] = useState<boolean>(false);
+  const clapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clapMonitorRef = useRef<BrowserClapMonitor | null>(null);
+  const fileUploadInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingFile, setUploadingFile] = useState<boolean>(false);
+  const isWebMode = status.runtime_mode === "web";
+
+  const [gradientMode, setGradientMode] = useState<GradientModeOption>(() => {
+    try {
+      return (localStorage.getItem("fryvis_gradient_mode") as GradientModeOption) || "auto";
+    } catch {
+      return "auto";
+    }
+  });
+
+  const handleGradientModeChange = (mode: GradientModeOption) => {
+    setGradientMode(mode);
+    try {
+      localStorage.setItem("fryvis_gradient_mode", mode);
+    } catch {}
+  };
 
   const [orbModel, setOrbModel] = useState<AIOrbModel>(() => {
     try {
@@ -166,6 +169,14 @@ export default function App() {
 
   const [agentsPanelOpen, setAgentsPanelOpen] = useState(false);
   const [agentsBadgeCount, setAgentsBadgeCount] = useState(0);
+  const [officeCommand, setOfficeCommand] = useState<{
+    seq: number;
+    action: string;
+    profile?: any;
+    activity?: string | null;
+    view_mode?: "office3d" | "list" | null;
+  } | null>(null);
+  const [agentEventSeq, setAgentEventSeq] = useState(0);
   const [kbDrawerOpen, setKbDrawerOpen] = useState(false);
   const [kbChunksCount, setKbChunksCount] = useState(0);
   const [liveScreenActive, setLiveScreenActive] = useState(false);
@@ -257,6 +268,9 @@ export default function App() {
   const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
 
   const forceLocalLock = useCallback(() => {
+    stopActiveBrowserRecording();
+    clapMonitorRef.current?.stop();
+    clapMonitorRef.current = null;
     e2eeSessionKeyRef.current = null;
     storeE2EEToken(null);
     setE2eeSessionToken(null);
@@ -335,8 +349,18 @@ export default function App() {
       })
       .catch(() => {});
 
+    fetch("/api/voice/clap")
+      .then((res) => res.json())
+      .then((cl) => {
+        if (active && typeof cl.enabled === "boolean") {
+          setClapEnabled(cl.enabled);
+        }
+      })
+      .catch(() => {});
+
     return () => {
       active = false;
+      if (clapTimerRef.current) clearTimeout(clapTimerRef.current);
     };
   }, []);
 
@@ -357,12 +381,17 @@ export default function App() {
     }
 
     let disposed = false;
+    let wsPingTimer: ReturnType<typeof setInterval> | null = null;
 
     function connectWs() {
       if (disposed) return;
       if (wsReconnectTimerRef.current) {
         clearTimeout(wsReconnectTimerRef.current);
         wsReconnectTimerRef.current = null;
+      }
+      if (wsPingTimer) {
+        clearInterval(wsPingTimer);
+        wsPingTimer = null;
       }
       const protocol = location.protocol === "https:" ? "wss:" : "ws:";
       const baseWsUrl = `${protocol}//${location.host || "127.0.0.1:8000"}/ws`;
@@ -373,9 +402,19 @@ export default function App() {
       ws.onopen = () => {
         setWsConnected(true);
         wsReconnectDelay.current = 1000;
+        if (wsPingTimer) clearInterval(wsPingTimer);
+        wsPingTimer = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "ping" }));
+          }
+        }, 25000);
       };
 
       ws.onclose = (ev) => {
+        if (wsPingTimer) {
+          clearInterval(wsPingTimer);
+          wsPingTimer = null;
+        }
         setWsConnected(false);
         wsRef.current = null;
         if (disposed) return;
@@ -431,6 +470,33 @@ export default function App() {
             if (typeof data.active === "boolean") setWakeWordActive(data.active);
           } else if (data.type === "mic_muted") {
             if (typeof data.muted === "boolean") setMicMuted(data.muted);
+          } else if (data.type === "clap_config") {
+            if (typeof data.enabled === "boolean") setClapEnabled(data.enabled);
+          } else if (data.type === "clap_detected") {
+            setClapFlash(true);
+            if (clapTimerRef.current) clearTimeout(clapTimerRef.current);
+            clapTimerRef.current = setTimeout(() => setClapFlash(false), 2400);
+          } else if (data.type === "agent_office_command") {
+            if (data.action === "close") {
+              setAgentsPanelOpen(false);
+            } else {
+              setAgentsPanelOpen(true);
+              setOfficeCommand({
+                seq: Date.now() + Math.random(),
+                action: data.action,
+                profile: data.profile,
+                activity: data.activity,
+                view_mode: data.view_mode,
+              });
+            }
+          } else if (typeof data.type === "string" && data.type.startsWith("agent_job_")) {
+            setAgentEventSeq((s) => s + 1);
+            if (
+              data.type === "agent_job_indexed" &&
+              typeof data.kb_info?.total_chunks_base === "number"
+            ) {
+              setKbChunksCount(data.kb_info.total_chunks_base);
+            }
           }
         } catch {}
       };
@@ -440,6 +506,7 @@ export default function App() {
 
     return () => {
       disposed = true;
+      if (wsPingTimer) clearInterval(wsPingTimer);
       if (wsReconnectTimerRef.current) clearTimeout(wsReconnectTimerRef.current);
       wsRef.current?.close();
       wsRef.current = null;
@@ -465,20 +532,38 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (aiState !== "speaking" && aiState !== "listening") {
+      setAudioLevel(0);
+      return;
+    }
     let animId: number;
-    const updateAudioLevel = () => {
-      if (analyserRef.current && dataArrayRef.current) {
+    const updateAudioLevel = (t: number) => {
+      let measured = 0;
+      const browserPlaying = Boolean(audioRef.current && !audioRef.current.paused);
+      if (browserPlaying && analyserRef.current && dataArrayRef.current) {
         analyserRef.current.getByteFrequencyData(dataArrayRef.current);
         let sum = 0;
         for (let i = 0; i < dataArrayRef.current.length; i++) sum += dataArrayRef.current[i];
-        const avg = sum / (dataArrayRef.current.length * 255);
-        if (avg > 0.01) setAudioLevel(avg);
+        measured = sum / (dataArrayRef.current.length * 255);
+      }
+      if (measured > 0.015) {
+        setAudioLevel(Math.min(1, measured * 1.45));
+      } else if (aiState === "speaking") {
+        const s = t * 0.001;
+        const synthetic =
+          0.26 +
+          0.16 * Math.abs(Math.sin(s * 6.4)) +
+          0.11 * Math.abs(Math.sin(s * 11.3 + 0.8));
+        setAudioLevel(synthetic);
+      } else if (aiState === "listening") {
+        const s = t * 0.001;
+        setAudioLevel(0.14 + 0.08 * Math.abs(Math.sin(s * 3.8)));
       }
       animId = requestAnimationFrame(updateAudioLevel);
     };
     animId = requestAnimationFrame(updateAudioLevel);
     return () => cancelAnimationFrame(animId);
-  }, []);
+  }, [aiState]);
 
   const cleanTextForSpeech = (text: string) => {
     if (!text) return "";
@@ -641,7 +726,7 @@ export default function App() {
       if (data && data.played_locally) {
         setAiState("idle");
         setAudioLevel(0);
-      } else if (data && data.has_audio && audioRef.current) {
+      } else if (data && data.has_audio && audioRef.current && !micMuted) {
         initAudioAnalyser();
         if (audioContextRef.current?.state === "suspended") {
           audioContextRef.current.resume().catch(() => {});
@@ -653,7 +738,7 @@ export default function App() {
         const audioTimer = setTimeout(() => {
           setAiState("idle");
           setAudioLevel(0);
-        }, 25000);
+        }, 30000);
 
         audioRef.current.onended = () => {
           clearTimeout(audioTimer);
@@ -668,7 +753,7 @@ export default function App() {
           clearTimeout(audioTimer);
           speakWithBrowser(data.response);
         });
-      } else if (data && data.response) {
+      } else if (data && data.response && !micMuted) {
         speakWithBrowser(data.response);
       } else {
         setAiState("idle");
@@ -692,6 +777,15 @@ export default function App() {
   };
 
   const pararComandoAtivo = async () => {
+    stopActiveBrowserRecording();
+    try {
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
+      if ("speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+    } catch {}
     setAiState("idle");
     setAudioLevel(0);
     try {
@@ -705,6 +799,118 @@ export default function App() {
   const handleVoice = async () => {
     if (e2eeRequired && !e2eeUnlocked) return;
     if (aiState === "thinking" || aiState === "speaking") return;
+
+    if (isWebMode) {
+      if (isBrowserRecording() || aiState === "listening") {
+        stopActiveBrowserRecording();
+        return;
+      }
+      if (micMuted) {
+        await toggleMicMute();
+        return;
+      }
+      setAiState("listening");
+      clapMonitorRef.current?.setSuppressed(true);
+      try {
+        const blob = await recordBrowserUtterance({
+          maxDurationMs: 10000,
+          silenceHoldMs: 1200,
+          onLevel: setAudioLevel,
+        });
+        if (!blob || blob.size < 128) {
+          setAiState("idle");
+          setAudioLevel(0);
+          clapMonitorRef.current?.setSuppressed(false);
+          return;
+        }
+        setAiState("thinking");
+        setAudioLevel(0);
+        const qs = new URLSearchParams({
+          profile: modelProfile,
+          provider: engineProvider,
+        });
+        const res = await fetch(`/api/voice/transcribe?${qs.toString()}`, {
+          method: "POST",
+          headers: buildE2EEHeaders(e2eeSessionToken, {
+            "Content-Type": blob.type || "audio/webm",
+          }),
+          body: blob,
+        });
+        if (res.status === 423) {
+          forceLocalLock();
+          return;
+        }
+        if (!res.ok) {
+          setAiState("idle");
+          return;
+        }
+        const data = await res.json();
+        if (data.transcription) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "user",
+              text: data.transcription,
+              time: new Date().toLocaleTimeString(),
+            },
+          ]);
+        }
+        if (data.response) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              text: data.response,
+              tools: data.tools_executed,
+              time: new Date().toLocaleTimeString(),
+            },
+          ]);
+        }
+        if (data.has_audio && audioRef.current && !micMuted) {
+          initAudioAnalyser();
+          if (audioContextRef.current?.state === "suspended") {
+            audioContextRef.current.resume().catch(() => {});
+          }
+          setAiState("speaking");
+          const baseAudioSrc = data.audio_url || `/api/audio/last?v=${Date.now()}`;
+          audioRef.current.src = appendE2EETokenToUrl(baseAudioSrc, e2eeSessionToken);
+          const audioTimer = setTimeout(() => {
+            setAiState("idle");
+            setAudioLevel(0);
+          }, 30000);
+          audioRef.current.onended = () => {
+            clearTimeout(audioTimer);
+            setAiState("idle");
+            setAudioLevel(0);
+          };
+          audioRef.current.onerror = () => {
+            clearTimeout(audioTimer);
+            speakWithBrowser(data.response);
+          };
+          audioRef.current.play().catch(() => {
+            clearTimeout(audioTimer);
+            speakWithBrowser(data.response);
+          });
+        } else if (data.response && !micMuted) {
+          speakWithBrowser(data.response);
+        } else {
+          setAiState("idle");
+        }
+      } catch {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            text: "Permita o acesso ao microfone no navegador para comandos por voz, senhor.",
+            time: new Date().toLocaleTimeString(),
+          },
+        ]);
+        setAiState("idle");
+        setAudioLevel(0);
+      }
+      return;
+    }
+
     if (aiState === "listening") {
       setAiState("idle");
       setAudioLevel(0);
@@ -721,6 +927,93 @@ export default function App() {
       });
       if (res.status === 423) forceLocalLock();
     } catch {}
+  };
+
+  const handleVoiceRef = useRef(handleVoice);
+  handleVoiceRef.current = handleVoice;
+
+  useEffect(() => {
+    clapMonitorRef.current?.setSuppressed(aiState !== "idle");
+  }, [aiState]);
+
+  useEffect(() => {
+    const canListenClaps =
+      isWebMode &&
+      !e2eeChecking &&
+      (!e2eeRequired || e2eeUnlocked) &&
+      clapEnabled &&
+      !micMuted;
+    if (!canListenClaps) {
+      clapMonitorRef.current?.stop();
+      clapMonitorRef.current = null;
+      return;
+    }
+    const monitor = new BrowserClapMonitor();
+    clapMonitorRef.current = monitor;
+    void monitor.start(() => {
+      setClapFlash(true);
+      if (clapTimerRef.current) clearTimeout(clapTimerRef.current);
+      clapTimerRef.current = setTimeout(() => setClapFlash(false), 2400);
+      void handleVoiceRef.current();
+    });
+    return () => {
+      monitor.stop();
+      if (clapMonitorRef.current === monitor) {
+        clapMonitorRef.current = null;
+      }
+    };
+  }, [isWebMode, e2eeChecking, e2eeRequired, e2eeUnlocked, clapEnabled, micMuted]);
+
+  const handleUploadWorkspaceFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || (e2eeRequired && !e2eeUnlocked)) return;
+    setUploadingFile(true);
+    try {
+      const res = await fetch(`/api/files/upload?filename=${encodeURIComponent(file.name)}`, {
+        method: "POST",
+        headers: buildE2EEHeaders(e2eeSessionToken, {
+          "Content-Type": file.type || "application/octet-stream",
+        }),
+        body: file,
+      });
+      if (res.status === 423) {
+        forceLocalLock();
+        return;
+      }
+      const data = await res.json();
+      if (!res.ok) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            text: data?.detail || "Não foi possível enviar o arquivo, senhor.",
+            time: new Date().toLocaleTimeString(),
+          },
+        ]);
+        return;
+      }
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          text: `Arquivo **${data.name}** carregado no workspace, senhor. Pode pedir para analisar, resumir ou editar os dados.`,
+          time: new Date().toLocaleTimeString(),
+        },
+      ]);
+      chatTextareaRef.current?.focus();
+    } catch {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          text: "Falha de conexão ao enviar o arquivo, senhor.",
+          time: new Date().toLocaleTimeString(),
+        },
+      ]);
+    } finally {
+      setUploadingFile(false);
+    }
   };
 
   const executeSkill = async (skill: string, args: Record<string, unknown> = {}) => {
@@ -742,20 +1035,66 @@ export default function App() {
     });
   };
 
-  const ActiveEngineIcon = currentEngine.icon;
+  const toggleClapWake = async () => {
+    if (e2eeRequired && !e2eeUnlocked) return;
+    const nextVal = !clapEnabled;
+    setClapEnabled(nextVal);
+    try {
+      const res = await fetch("/api/voice/clap", {
+        method: "POST",
+        headers: buildE2EEHeaders(e2eeSessionToken, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ enabled: nextVal }),
+      });
+      if (res.status === 423) {
+        forceLocalLock();
+        setClapEnabled(!nextVal);
+      }
+    } catch {
+      setClapEnabled(!nextVal);
+    }
+  };
+
+  const activeGradientPreset =
+    gradientMode === "auto"
+      ? clapFlash || aiState === "listening"
+        ? "Pulse"
+        : aiState === "thinking"
+          ? "Plasma"
+          : "Prism"
+      : gradientMode === "off"
+        ? "Prism"
+        : gradientMode;
+
+  const activeGradientSpeed =
+    aiState === "speaking" ? Math.round(30 + audioLevel * 36) : clapFlash ? 42 : 28;
 
   return (
     <div className="w-screen h-dvh flex overflow-hidden bg-[#02050b] text-slate-200 font-sans selection:bg-cyan-500/30">
       <audio ref={audioRef} className="hidden" preload="auto" />
 
+      {/* Camada Spell UI AnimatedGradient (Prism / Reativo) + Partículas Sutis */}
+      {gradientMode !== "off" && (
+        <div className="fixed inset-0 z-0 pointer-events-none opacity-45 transition-opacity duration-700">
+          <AnimatedGradient
+            paused={agentsPanelOpen}
+            style={{ zIndex: 0 }}
+            config={{ preset: activeGradientPreset, speed: activeGradientSpeed }}
+            noise={{ opacity: 0.07 }}
+          />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_44%_50%,transparent_14%,#02050b_85%)]" />
+        </div>
+      )}
+
       {/* Partículas ambientais sutis */}
       <div className="fixed inset-0 z-0 pointer-events-none opacity-15 mix-blend-screen">
-        <ParticleDrift
-          mode="dark"
-          speed={aiState === "thinking" ? 1.1 : 0.35}
-          density={0.45}
-          hue={aiState === "thinking" ? 195 : aiState === "listening" ? 150 : 210}
-        />
+        {!agentsPanelOpen && (
+          <ParticleDrift
+            mode="dark"
+            speed={aiState === "thinking" ? 1.1 : 0.35}
+            density={0.45}
+            hue={aiState === "thinking" ? 195 : aiState === "listening" ? 150 : 210}
+          />
+        )}
       </div>
 
       {/* 1. Command Rail Lateral Esquerdo */}
@@ -763,6 +1102,8 @@ export default function App() {
         <CommandRail
           orbModel={orbModel}
           onOrbModelChange={handleOrbModelChange}
+          gradientMode={gradientMode}
+          onGradientModeChange={handleGradientModeChange}
           isFullScreenOrb={isFullScreenOrb}
           onToggleFullScreen={() => setIsFullScreenOrb((v) => !v)}
           agentsOpen={agentsPanelOpen}
@@ -786,6 +1127,7 @@ export default function App() {
           e2eeRequired={e2eeRequired}
           e2eeUnlocked={e2eeUnlocked}
           onLockAI={handleLockAI}
+          isWebMode={isWebMode}
         />
       )}
 
@@ -830,11 +1172,12 @@ export default function App() {
                 aria-expanded={enginePopoverOpen}
                 className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#060d1c]/85 border border-white/12 hover:border-cyan-400/40 text-[11px] font-mono text-slate-200 transition-all cursor-pointer backdrop-blur-xl"
               >
-                <ActiveEngineIcon size={12} className={currentEngine.color} />
+                <Icons8Icon name={currentEngine.icon} size={13} className={currentEngine.color} />
                 <span className="font-semibold">{currentEngine.label}</span>
                 <span className="text-slate-600">·</span>
                 <span className="text-slate-300">{currentProfile.name}</span>
-                <ChevronDown
+                <Icons8Icon
+                  name="chevron-down"
                   size={12}
                   className={`text-slate-400 transition-transform ${
                     enginePopoverOpen ? "rotate-180" : ""
@@ -850,7 +1193,6 @@ export default function App() {
                     </p>
                     <div className="grid grid-cols-3 gap-1.5">
                       {ENGINE_OPTIONS.map((eng) => {
-                        const Icon = eng.icon;
                         const active = engineProvider === eng.id;
                         return (
                           <button
@@ -864,7 +1206,11 @@ export default function App() {
                                 : "bg-white/[0.03] border-white/8 text-slate-400 hover:text-slate-200"
                             }`}
                           >
-                            <Icon size={13} className={active ? eng.color : "text-slate-500"} />
+                            <Icons8Icon
+                              name={eng.icon}
+                              size={14}
+                              className={active ? eng.color : "text-slate-500"}
+                            />
                             <span>{eng.label}</span>
                           </button>
                         );
@@ -906,7 +1252,7 @@ export default function App() {
                               <span className="text-[9.5px] font-mono px-1.5 py-0.5 rounded bg-white/6 text-cyan-200">
                                 {prof.tokens}
                               </span>
-                              {active && <Check size={12} className="text-emerald-400" />}
+                              {active && <Icons8Icon name="check" size={12} className="text-emerald-400" />}
                             </div>
                           </button>
                         );
@@ -922,7 +1268,7 @@ export default function App() {
               onClick={() => setAgentsPanelOpen(true)}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-500/14 hover:bg-cyan-500/24 border border-cyan-400/35 text-cyan-200 text-[11px] font-mono font-semibold transition-all cursor-pointer backdrop-blur-xl"
             >
-              <Bot size={13} className="text-cyan-300" />
+              <Icons8Icon name="bot" size={14} className="text-cyan-300" />
               <span className="hidden sm:inline">Agentes</span>
               {agentsBadgeCount > 0 && (
                 <span className="px-1.5 py-0.2 rounded-full bg-cyan-400 text-slate-950 text-[9px] font-bold">
@@ -936,7 +1282,7 @@ export default function App() {
                 title="Sessão Criptografada Ponta a Ponta (ECDH P-256 + AES-256-GCM)"
                 className="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-emerald-500/12 border border-emerald-400/30 text-emerald-300 text-[10px] font-mono"
               >
-                <ShieldCheck size={12} className="text-emerald-400" />
+                <Icons8Icon name="shield-check" size={13} className="text-emerald-400" />
                 <span>E2EE</span>
               </div>
             )}
@@ -953,14 +1299,16 @@ export default function App() {
           </div>
         </header>
 
-        {/* Orbe 3D Central */}
+        {/* Orbe 3D Central (pausado quando Escritório 3D está em tela cheia p/ poupar GPU) */}
         <div className="w-full h-full flex items-center justify-center relative">
-          <AIOrb
-            model={orbModel}
-            state={aiState}
-            audioLevel={audioLevel}
-            className="w-full h-full"
-          />
+          {!agentsPanelOpen && (
+            <AIOrb
+              model={orbModel}
+              state={aiState}
+              audioLevel={audioLevel}
+              className="w-full h-full"
+            />
+          )}
         </div>
 
         {/* Dock Flutuante de Voz */}
@@ -977,7 +1325,7 @@ export default function App() {
                   : "bg-white/[0.04] border-white/10 text-slate-400 hover:text-red-300 hover:border-red-400/35"
               }`}
             >
-              <MicOff className="w-4 h-4" />
+              <Icons8Icon name="mic-off" className="w-[18px] h-[18px]" />
             </button>
 
             <button
@@ -998,10 +1346,30 @@ export default function App() {
                     : "bg-cyan-500/18 hover:bg-cyan-500/28 border-cyan-400/45 text-cyan-200 shadow-[0_0_20px_rgba(34,211,238,0.2)]"
               }`}
             >
-              <Mic className="w-5 h-5" />
+              <Icons8Icon name="mic" className="w-5 h-5" />
               {aiState === "listening" && (
                 <span className="absolute inset-0 rounded-full border-2 border-emerald-300 animate-ping" />
               )}
+            </button>
+
+            <button
+              type="button"
+              onClick={toggleClapWake}
+              title={
+                clapEnabled
+                  ? "Ativação por 2 palmas ativa (clique para desativar)"
+                  : "Ativar despertar por 2 palmas (Clap on Jarvis)"
+              }
+              aria-label="Alternar ativação por duas palmas"
+              className={`w-10 h-10 rounded-full flex items-center justify-center transition-all cursor-pointer border ${
+                clapFlash
+                  ? "bg-emerald-400 border-emerald-200 text-slate-950 scale-110 shadow-[0_0_22px_rgba(52,211,153,0.75)]"
+                  : clapEnabled
+                    ? "bg-emerald-500/16 border-emerald-400/40 text-emerald-300 hover:bg-emerald-500/26"
+                    : "bg-white/[0.04] border-white/10 text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              <Icons8Icon name="applause" className="w-[18px] h-[18px]" />
             </button>
 
             {(aiState === "thinking" || aiState === "speaking") && (
@@ -1012,28 +1380,39 @@ export default function App() {
                 aria-label="Parar comando atual"
                 className="w-10 h-10 rounded-full flex items-center justify-center bg-red-500/25 hover:bg-red-500/40 border border-red-400/45 text-red-200 transition-all cursor-pointer"
               >
-                <X className="w-4 h-4" />
+                <Icons8Icon name="close" className="w-4 h-4" />
               </button>
             )}
           </div>
 
           <div className="inline-flex items-center gap-1.5 text-[10px] font-mono text-slate-400">
-            <Radio
-              size={10}
+            <Icons8Icon
+              name={clapFlash ? "applause" : "radio"}
+              size={12}
               className={
-                micMuted
-                  ? "text-red-400"
-                  : wakeWordActive
-                    ? "text-emerald-400 animate-pulse"
-                    : "text-slate-500"
+                clapFlash
+                  ? "text-emerald-300 animate-bounce"
+                  : micMuted
+                    ? "text-red-400"
+                    : wakeWordActive
+                      ? "text-emerald-400 animate-pulse"
+                      : "text-slate-500"
               }
             />
             <span>
-              {micMuted
-                ? "Voz silenciada"
-                : wakeWordActive
-                  ? 'Escuta ativa · diga "FRYIVS"'
-                  : "Escuta em espera"}
+              {clapFlash
+                ? "2 palmas detectadas · ouvindo senhor!"
+                : micMuted
+                  ? "Voz silenciada"
+                  : isWebMode
+                    ? clapEnabled
+                      ? "Modo Web · clique no mic ou bata 2 palmas"
+                      : "Modo Web · clique no microfone para falar"
+                    : wakeWordActive
+                      ? clapEnabled
+                        ? 'Escuta ativa · diga "FRYIVS" ou bata 2 palmas'
+                        : 'Escuta ativa · diga "FRYIVS"'
+                      : "Escuta em espera"}
             </span>
           </div>
         </div>
@@ -1051,7 +1430,7 @@ export default function App() {
             {/* Header enxuto do Chat */}
             <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/8 bg-[#050c1a]/80">
               <div className="flex items-center gap-2.5">
-                <MessageSquare size={15} className="text-cyan-400" />
+                <Icons8Icon name="message" size={16} className="text-cyan-400" />
                 <div>
                   <h2 className="text-xs font-mono uppercase tracking-[0.18em] text-white font-bold">
                     Terminal Neural
@@ -1066,7 +1445,7 @@ export default function App() {
                       onClick={() => setKbDrawerOpen(true)}
                       className="inline-flex items-center gap-1 text-emerald-300 hover:underline cursor-pointer"
                     >
-                      <BookOpen size={10} />
+                      <Icons8Icon name="book-open" size={11} />
                       {kbChunksCount} chunks KB
                     </button>
                   </p>
@@ -1082,7 +1461,7 @@ export default function App() {
                     aria-label="Limpar conversa"
                     className="p-1.5 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-white/6 transition-colors cursor-pointer"
                   >
-                    <Trash2 size={14} />
+                    <Icons8Icon name="trash" size={15} />
                   </button>
                 )}
                 <button
@@ -1092,7 +1471,7 @@ export default function App() {
                   aria-label="Recolher painel de diálogo"
                   className="p-1.5 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-white/6 transition-colors cursor-pointer"
                 >
-                  <ChevronRight size={15} />
+                  <Icons8Icon name="chevron-right" size={15} />
                 </button>
               </div>
             </div>
@@ -1101,16 +1480,24 @@ export default function App() {
             <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
               {messages.length === 0 ? (
                 <div className="h-full flex flex-col justify-center gap-5 py-4">
-                  <div className="flex flex-col items-center text-center gap-2.5 px-4">
-                    <div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-cyan-500/10 border border-cyan-400/25">
-                      <Brain className="w-6 h-6 text-cyan-300" />
+                  <div className="relative overflow-hidden rounded-2xl border border-cyan-400/20 p-5 flex flex-col items-center text-center gap-2.5">
+                    {gradientMode !== "off" && (
+                      <AnimatedGradient
+                        paused={agentsPanelOpen}
+                        style={{ zIndex: 0, opacity: 0.42 }}
+                        radius="16px"
+                        config={{ preset: "Prism", speed: 24 }}
+                      />
+                    )}
+                    <div className="relative z-10 w-12 h-12 rounded-2xl flex items-center justify-center bg-cyan-500/15 border border-cyan-400/35 backdrop-blur-md">
+                      <Icons8Icon name="brain" className="w-6 h-6 text-cyan-200" />
                     </div>
-                    <div>
-                      <p className="text-xs font-mono uppercase tracking-[0.2em] text-slate-200 font-semibold">
+                    <div className="relative z-10">
+                      <p className="text-xs font-mono uppercase tracking-[0.2em] text-white font-semibold">
                         Núcleo F.R.Y.I.Vs Operacional
                       </p>
-                      <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                        Envie um comando direto abaixo ou acione o esquadrão especializado.
+                      <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                        Comande por voz, bata duas palmas ou acione o esquadrão abaixo.
                       </p>
                     </div>
                   </div>
@@ -1119,14 +1506,14 @@ export default function App() {
                   <div className="grid grid-cols-1 gap-2">
                     {[
                       {
-                        icon: Search,
+                        icon: "search" as Icons8Name,
                         accent: "text-cyan-300",
                         title: "Pesquisar & Indexar Conhecimento",
                         desc: "Acionar Agente Pesquisador e salvar na Base da IA",
                         onClick: () => setAgentsPanelOpen(true),
                       },
                       {
-                        icon: FolderKanban,
+                        icon: "folder-kanban" as Icons8Name,
                         accent: "text-emerald-300",
                         title: "Organizar Planilhas e Arquivos",
                         desc: "Estruturar dados, documentos Word e tabelas Excel",
@@ -1136,7 +1523,7 @@ export default function App() {
                           ),
                       },
                       {
-                        icon: Lightbulb,
+                        icon: "lightbulb" as Icons8Name,
                         accent: "text-amber-300",
                         title: "Gerar Ideias para Evoluir a IA",
                         desc: "Pedir propostas criativas ao Agente de Ideias",
@@ -1146,34 +1533,31 @@ export default function App() {
                           ),
                       },
                       {
-                        icon: Code2,
+                        icon: "code" as Icons8Name,
                         accent: "text-blue-300",
                         title: "Diagnóstico de Engenharia",
                         desc: "Consultar arquitetura e saúde do sistema",
                         onClick: () =>
                           void sendMessageText("Mostre o status atual de CPU, RAM e resumo da arquitetura."),
                       },
-                    ].map((card, idx) => {
-                      const CardIcon = card.icon;
-                      return (
-                        <button
-                          key={idx}
-                          type="button"
-                          onClick={card.onClick}
-                          className="text-left rounded-xl border border-white/8 bg-white/[0.025] hover:bg-cyan-500/[0.07] hover:border-cyan-400/30 p-3 flex items-start gap-3 transition-all cursor-pointer group"
-                        >
-                          <div className="w-8 h-8 rounded-lg bg-black/45 border border-white/10 flex items-center justify-center shrink-0 mt-0.5">
-                            <CardIcon className={`w-4 h-4 ${card.accent}`} />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-xs font-semibold text-slate-100 group-hover:text-white">
-                              {card.title}
-                            </p>
-                            <p className="text-[11px] text-slate-400 truncate mt-0.5">{card.desc}</p>
-                          </div>
-                        </button>
-                      );
-                    })}
+                    ].map((card, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={card.onClick}
+                        className="text-left rounded-xl border border-white/8 bg-white/[0.025] hover:bg-cyan-500/[0.07] hover:border-cyan-400/30 p-3 flex items-start gap-3 transition-all cursor-pointer group"
+                      >
+                        <div className="w-8 h-8 rounded-lg bg-black/45 border border-white/10 flex items-center justify-center shrink-0 mt-0.5">
+                          <Icons8Icon name={card.icon} className={`w-4 h-4 ${card.accent}`} />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-slate-100 group-hover:text-white">
+                            {card.title}
+                          </p>
+                          <p className="text-[11px] text-slate-400 truncate mt-0.5">{card.desc}</p>
+                        </div>
+                      </button>
+                    ))}
                   </div>
                 </div>
               ) : (
@@ -1194,9 +1578,9 @@ export default function App() {
                         }`}
                       >
                         {isUser ? (
-                          <User size={13} className="text-cyan-300" />
+                          <Icons8Icon name="user" size={14} className="text-cyan-300" />
                         ) : (
-                          <Bot size={13} className="text-cyan-400" />
+                          <Icons8Icon name="bot" size={14} className="text-cyan-400" />
                         )}
                       </div>
 
@@ -1227,9 +1611,9 @@ export default function App() {
                               className="text-slate-500 hover:text-cyan-300 transition-colors ml-1 cursor-pointer"
                             >
                               {copiedMsgIdx === i ? (
-                                <Check size={11} className="text-emerald-400" />
+                                <Icons8Icon name="check" size={12} className="text-emerald-400" />
                               ) : (
-                                <Copy size={11} />
+                                <Icons8Icon name="copy" size={12} />
                               )}
                             </button>
                           )}
@@ -1262,9 +1646,10 @@ export default function App() {
                               }
                               className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 text-[10px] font-mono text-cyan-300 cursor-pointer"
                             >
-                              <Wrench size={10} />
+                              <Icons8Icon name="wrench" size={11} />
                               <span>{msg.tools!.length} skill(s) executada(s)</span>
-                              <ChevronDown
+                              <Icons8Icon
+                                name="chevron-down"
                                 size={10}
                                 className={`transition-transform ${toolsExpanded ? "rotate-180" : ""}`}
                               />
@@ -1297,13 +1682,31 @@ export default function App() {
 
             {/* Composer */}
             <div className="p-4 pt-2 border-t border-white/8 bg-[#050c1a]/70">
+              <input
+                ref={fileUploadInputRef}
+                type="file"
+                accept=".xlsx,.xlsm,.csv,.docx,.txt,.md,.json,.pdf"
+                className="hidden"
+                onChange={handleUploadWorkspaceFile}
+              />
               <form
                 onSubmit={handleSend}
-                className="flex items-end gap-2 p-1.5 pl-3 bg-[#070f20] border border-white/12 rounded-2xl focus-within:border-cyan-400/55 transition-all"
+                className="flex items-end gap-2 p-1.5 pl-2.5 bg-[#070f20] border border-white/12 rounded-2xl focus-within:border-cyan-400/55 transition-all"
               >
-                <div className="pb-2 text-cyan-400/70 shrink-0 pointer-events-none">
-                  <TerminalSquare size={16} />
-                </div>
+                <button
+                  type="button"
+                  onClick={() => fileUploadInputRef.current?.click()}
+                  disabled={uploadingFile}
+                  title="Enviar planilha (.xlsx/.csv) ou documento (.docx) para o workspace"
+                  aria-label="Enviar arquivo para análise"
+                  className="w-8 h-8 mb-0.5 shrink-0 flex items-center justify-center rounded-xl text-slate-400 hover:text-cyan-300 hover:bg-cyan-500/12 transition-colors cursor-pointer disabled:opacity-40"
+                >
+                  <Icons8Icon
+                    name={uploadingFile ? "loader" : "book-add"}
+                    size={16}
+                    className={uploadingFile ? "animate-spin text-cyan-300" : ""}
+                  />
+                </button>
                 <textarea
                   ref={chatTextareaRef}
                   value={input}
@@ -1332,7 +1735,7 @@ export default function App() {
                   title="Enviar mensagem (Enter)"
                   className="w-9 h-9 shrink-0 flex items-center justify-center rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-bold transition-all disabled:opacity-25 disabled:pointer-events-none cursor-pointer mb-0.5"
                 >
-                  <SendHorizontal size={16} />
+                  <Icons8Icon name="send" size={16} />
                 </button>
               </form>
             </div>
@@ -1347,6 +1750,8 @@ export default function App() {
         onClose={() => setAgentsPanelOpen(false)}
         onKnowledgeIndexed={(total) => setKbChunksCount(total)}
         onJobsBadgeChange={setAgentsBadgeCount}
+        officeCommand={officeCommand}
+        agentEventSeq={agentEventSeq}
       />
 
       <KnowledgeBaseDrawer

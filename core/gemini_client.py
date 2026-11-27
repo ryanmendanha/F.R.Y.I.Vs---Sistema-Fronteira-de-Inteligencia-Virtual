@@ -476,3 +476,82 @@ def ask_gemini_stream(
         "type": "error",
         "error": f"Não foi possível obter resposta em streaming do Gemini Cloud ({last_error}), senhor.",
     }
+
+
+def transcribe_audio_gemini(audio_bytes: bytes, mime_type: str = "audio/webm") -> str:
+    """
+    Transcreve áudio capturado no navegador Web/Mobile usando Gemini Multimodal Audio
+    (zero RAM extra de modelos locais no container Cloud).
+    """
+    import base64
+
+    api_key = os.getenv("GEMINI_API_KEY", "").strip() or GEMINI_API_KEY
+    if not api_key or not audio_bytes:
+        return ""
+
+    clean_mime = (mime_type or "audio/webm").split(";")[0].strip().lower()
+    if clean_mime not in (
+        "audio/webm",
+        "audio/ogg",
+        "audio/mp4",
+        "audio/aac",
+        "audio/wav",
+        "audio/x-wav",
+        "audio/mpeg",
+        "audio/mp3",
+        "audio/flac",
+    ):
+        clean_mime = "audio/webm"
+
+    b64_audio = base64.b64encode(audio_bytes).decode("ascii")
+    payload = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {"inlineData": {"mimeType": clean_mime, "data": b64_audio}},
+                    {
+                        "text": (
+                            "Transcreva fielmente apenas a fala em português contida neste áudio, "
+                            "sem adicionar explicações, aspas ou comentários. "
+                            "Se houver apenas silêncio ou ruído sem fala inteligível, retorne apenas vazio."
+                        )
+                    },
+                ],
+            }
+        ],
+        "generationConfig": {"temperature": 0.0, "maxOutputTokens": 256},
+    }
+    data_bytes = json.dumps(payload).encode("utf-8")
+    headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
+
+    for model in FALLBACK_MODELS:
+        clean_model = model.replace("models/", "")
+        endpoint = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{clean_model}:generateContent"
+        )
+        try:
+            client = _get_http_client()
+            if client is not None:
+                resp = client.post(endpoint, content=data_bytes, headers=headers, timeout=20.0)
+                if resp.status_code != 200:
+                    continue
+                body = resp.json()
+            else:
+                req = urllib.request.Request(endpoint, data=data_bytes, headers=headers, method="POST")
+                with urllib.request.urlopen(req, timeout=20.0) as r:
+                    body = json.loads(r.read().decode("utf-8"))
+
+            candidates = body.get("candidates") or []
+            if not candidates:
+                return ""
+            parts = candidates[0].get("content", {}).get("parts") or []
+            text = " ".join(str(p.get("text", "")) for p in parts if p.get("text")).strip()
+            if text.lower() in ("vazio", '""', "''", "[silêncio]", "[silencio]", "silêncio"):
+                return ""
+            return text
+        except Exception as exc:
+            print(f"[GeminiAudioSTT] Tentativa em {clean_model} falhou: {exc}")
+            continue
+    return ""

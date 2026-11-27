@@ -1,33 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FC, FormEvent } from "react";
-import {
-  Activity,
-  AlertTriangle,
-  BookPlus,
-  Bot,
-  Check,
-  CheckCircle2,
-  ChevronDown,
-  ChevronUp,
-  Clock,
-  Code2,
-  Cpu,
-  FolderKanban,
-  Gauge,
-  Lightbulb,
-  Loader2,
-  OctagonX,
-  RefreshCw,
-  Search,
-  Send,
-  ShieldAlert,
-  ShieldCheck,
-  Sparkles,
-  Trash2,
-  X,
-  XCircle,
-} from "lucide-react";
+import { Icons8Icon, type Icons8Name } from "@/components/Icons8Icon";
 import { FormattedText } from "@/components/FormattedText";
+import { AgentsOffice3D, type OfficeExternalCommand } from "@/components/AgentsOffice3D";
 
 export interface AgentsControlPanelProps {
   sessionToken: string | null;
@@ -35,6 +10,8 @@ export interface AgentsControlPanelProps {
   onClose: () => void;
   onKnowledgeIndexed?: (totalChunks: number) => void;
   onJobsBadgeChange?: (count: number) => void;
+  officeCommand?: (OfficeExternalCommand & { view_mode?: "office3d" | "list" | null }) | null;
+  agentEventSeq?: number;
 }
 
 export type HermesProfileName = "pesquisador" | "organizador" | "ideias" | "engenheiro";
@@ -89,44 +66,25 @@ interface PendingApprovalItem {
   tool: string;
   tier: number;
   args_summary: string;
-  created_at: number;
-  created_at_iso: string;
-  expires_at: number;
-  status: "pending" | "approved" | "denied" | "expired";
-  actor: string;
-  agent: string;
-  correlation_id: string;
   reason: string;
   context_tainted: boolean;
 }
 
 interface BudgetSnapshot {
-  date: string;
   daily_tokens_used: number;
   daily_usd_used: number;
   max_usd_per_day: number;
   usd_utilization_pct: number;
   active_concurrent: number;
   max_concurrent_agents: number;
-  max_hop_count: number;
-  max_steps_hermes: number;
-  max_wall_time_s: number;
-  max_tokens_per_job: number;
 }
 
 interface AgentsStatusResponse {
   hermes: {
-    api_url: string;
-    online: boolean;
     state: "online" | "native" | "offline" | "standby";
-    engine_mode?: "hermes_wsl2" | "native_fryivs" | "offline";
-    native_fallback_enabled?: boolean;
-    detail: string;
-    redis_configured: boolean;
     profiles: HermesProfileInfo[];
   };
   budget: BudgetSnapshot;
-  active_jobs: AgentJobItem[];
   jobs: AgentJobItem[];
   pending_approvals: PendingApprovalItem[];
 }
@@ -135,62 +93,46 @@ const DEFAULT_PROFILES: HermesProfileInfo[] = [
   {
     name: "pesquisador",
     label: "Pesquisador",
-    mission: "Pesquisas aprofundadas na web, artigos, benchmarks e dossiês prontos para indexar na IA.",
-    tools: ["pesquisar_informacao_web", "consultar_mapa_codigo"],
-    sandbox: "Restrito (somente leitura + curadoria KB)",
+    mission: "",
+    tools: [],
+    sandbox: "",
     model_alias: "hermes/pesquisador",
     default_max_steps: 15,
   },
   {
     name: "organizador",
-    label: "Organizador de Dados",
-    mission: "Estruturação, limpeza e catalogação de planilhas Excel/CSV, documentos Word e pastas de dados.",
-    tools: ["gerenciar_arquivos", "consultar_planilha", "criar_planilha", "ler_documento_word"],
-    sandbox: "Workspace de dados e documentos locais",
+    label: "Organizador",
+    mission: "",
+    tools: [],
+    sandbox: "",
     model_alias: "hermes/organizador",
     default_max_steps: 15,
   },
   {
     name: "ideias",
-    label: "Agente de Ideias",
-    mission: "Geração de novas skills, automações, fluxos cognitivos e propostas de evolução para a F.R.Y.I.Vs.",
-    tools: ["resumo_arquitetura_sistema", "consultar_mapa_codigo", "pesquisar_informacao_web"],
-    sandbox: "Somente leitura arquitetural + pesquisa criativa",
+    label: "Ideias",
+    mission: "",
+    tools: [],
+    sandbox: "",
     model_alias: "hermes/ideias",
     default_max_steps: 12,
   },
   {
     name: "engenheiro",
     label: "Engenheiro",
-    mission: "Auditoria técnica de código, grafo arquitetural (Graphify), diagnóstico de módulos e performance.",
-    tools: ["consultar_mapa_codigo", "explicar_modulo_grafo", "caminho_entre_componentes"],
-    sandbox: "Inspeção técnica e grafo de código",
+    mission: "",
+    tools: [],
+    sandbox: "",
     model_alias: "hermes/engenheiro",
     default_max_steps: 15,
   },
 ];
 
-const PROFILE_SUGGESTIONS: Record<HermesProfileName, string[]> = {
-  pesquisador: [
-    "Pesquise boas práticas de RAG híbrido em 2026",
-    "Pesquise novidades do ecossistema Python 3.13",
-    "Pesquise arquiteturas de agentes autônomos seguros",
-  ],
-  organizador: [
-    "Liste e categorize os arquivos de dados do projeto",
-    "Estruture um modelo de planilha financeira mensal",
-    "Catalogue documentos disponíveis para organização",
-  ],
-  ideias: [
-    "Proponha 5 novas skills de alto impacto para a F.R.Y.I.Vs",
-    "Sugira automações com n8n para produtividade diária",
-    "Ideias para evoluir a memória e proatividade da IA",
-  ],
-  engenheiro: [
-    "Audite os módulos centrais e conexões da arquitetura",
-    "Explique o fluxo entre servidor, pipeline e memória",
-    "Identifique gargalos técnicos no mapa de código",
-  ],
+const SHORT_LABELS: Record<HermesProfileName, string> = {
+  pesquisador: "Pesquisador",
+  organizador: "Organizador",
+  ideias: "Ideias",
+  engenheiro: "Engenheiro",
 };
 
 function buildAuthHeaders(
@@ -204,48 +146,40 @@ function buildAuthHeaders(
   return headers;
 }
 
-function formatElapsed(seconds: number): string {
-  const safe = Math.max(0, Math.floor(seconds));
-  if (safe < 60) return `${safe}s`;
-  const mins = Math.floor(safe / 60);
-  const rem = safe % 60;
-  return `${mins}m ${rem.toString().padStart(2, "0")}s`;
-}
-
 function getProfileMeta(profile: HermesProfileName): {
   badgeClass: string;
   selectedBorder: string;
   accentText: string;
-  icon: typeof Search;
+  icon: Icons8Name;
 } {
   switch (profile) {
     case "pesquisador":
       return {
-        badgeClass: "bg-cyan-500/15 border-cyan-400/35 text-cyan-200",
-        selectedBorder: "border-cyan-400/60 bg-cyan-500/12 shadow-[0_0_20px_rgba(34,211,238,0.16)]",
-        accentText: "text-cyan-300",
-        icon: Search,
+        badgeClass: "bg-blue-500/18 border-blue-400/40 text-blue-200",
+        selectedBorder: "border-blue-400/65 bg-blue-500/16",
+        accentText: "text-blue-300",
+        icon: "search",
       };
     case "organizador":
       return {
-        badgeClass: "bg-emerald-500/15 border-emerald-400/35 text-emerald-200",
-        selectedBorder: "border-emerald-400/60 bg-emerald-500/12 shadow-[0_0_20px_rgba(16,185,129,0.16)]",
+        badgeClass: "bg-emerald-500/18 border-emerald-400/40 text-emerald-200",
+        selectedBorder: "border-emerald-400/65 bg-emerald-500/16",
         accentText: "text-emerald-300",
-        icon: FolderKanban,
+        icon: "folder-kanban",
       };
     case "ideias":
       return {
-        badgeClass: "bg-amber-500/15 border-amber-400/35 text-amber-200",
-        selectedBorder: "border-amber-400/60 bg-amber-500/12 shadow-[0_0_20px_rgba(245,158,11,0.16)]",
-        accentText: "text-amber-300",
-        icon: Lightbulb,
+        badgeClass: "bg-purple-500/18 border-purple-400/40 text-purple-200",
+        selectedBorder: "border-purple-400/65 bg-purple-500/16",
+        accentText: "text-purple-300",
+        icon: "lightbulb",
       };
     case "engenheiro":
       return {
-        badgeClass: "bg-blue-500/15 border-blue-400/35 text-blue-200",
-        selectedBorder: "border-blue-400/60 bg-blue-500/12 shadow-[0_0_20px_rgba(59,130,246,0.16)]",
-        accentText: "text-blue-300",
-        icon: Code2,
+        badgeClass: "bg-cyan-500/18 border-cyan-400/40 text-cyan-200",
+        selectedBorder: "border-cyan-400/65 bg-cyan-500/16",
+        accentText: "text-cyan-300",
+        icon: "code",
       };
   }
 }
@@ -253,45 +187,21 @@ function getProfileMeta(profile: HermesProfileName): {
 function getStatusBadge(status: AgentJobStatus): { label: string; className: string } {
   switch (status) {
     case "running":
-      return {
-        label: "Em execução",
-        className: "bg-cyan-500/20 border-cyan-400/45 text-cyan-200",
-      };
+      return { label: "Executando", className: "bg-cyan-500/20 border-cyan-400/45 text-cyan-200" };
     case "queued":
-      return {
-        label: "Na fila",
-        className: "bg-blue-500/20 border-blue-400/40 text-blue-200",
-      };
+      return { label: "Fila", className: "bg-blue-500/20 border-blue-400/40 text-blue-200" };
     case "awaiting_approval":
-      return {
-        label: "Aguardando Tier 3",
-        className: "bg-amber-500/20 border-amber-400/50 text-amber-200",
-      };
+      return { label: "Tier 3", className: "bg-amber-500/20 border-amber-400/50 text-amber-200" };
     case "completed":
-      return {
-        label: "Concluído",
-        className: "bg-emerald-500/20 border-emerald-400/40 text-emerald-200",
-      };
+      return { label: "Pronto", className: "bg-emerald-500/20 border-emerald-400/40 text-emerald-200" };
     case "offline":
-      return {
-        label: "Hermes Offline",
-        className: "bg-slate-500/20 border-slate-400/40 text-slate-300",
-      };
+      return { label: "Offline", className: "bg-slate-500/20 border-slate-400/40 text-slate-300" };
     case "cancelled":
-      return {
-        label: "Cancelado",
-        className: "bg-slate-600/25 border-slate-500/40 text-slate-300",
-      };
+      return { label: "Cancelado", className: "bg-slate-600/25 border-slate-500/40 text-slate-300" };
     case "killed":
-      return {
-        label: "Kill-Switch",
-        className: "bg-red-500/25 border-red-400/50 text-red-200",
-      };
+      return { label: "Parado", className: "bg-red-500/25 border-red-400/50 text-red-200" };
     case "failed":
-      return {
-        label: "Falhou",
-        className: "bg-red-500/20 border-red-400/45 text-red-200",
-      };
+      return { label: "Erro", className: "bg-red-500/20 border-red-400/45 text-red-200" };
   }
 }
 
@@ -301,11 +211,16 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
   onClose,
   onKnowledgeIndexed,
   onJobsBadgeChange,
+  officeCommand,
+  agentEventSeq,
 }) => {
+  const [viewMode, setViewMode] = useState<"office3d" | "list">("office3d");
+  const [officeSidebarOpen, setOfficeSidebarOpen] = useState(true);
+  const [celebrationSignal, setCelebrationSignal] = useState(0);
+
   const [statusData, setStatusData] = useState<AgentsStatusResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [bannerMsg, setBannerMsg] = useState<string | null>(null);
 
   const [selectedProfile, setSelectedProfile] = useState<HermesProfileName>("pesquisador");
   const [taskInput, setTaskInput] = useState("");
@@ -340,15 +255,10 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
         });
 
         if (res.status === 423) {
-          if (mountedRef.current) {
-            setError("Sessão E2EE bloqueada. Desbloqueie o cofre para gerenciar agentes.");
-          }
+          if (mountedRef.current) setError("Sessão E2EE bloqueada.");
           return;
         }
-
-        if (!res.ok) {
-          throw new Error(`Falha ao consultar agentes (HTTP ${res.status}).`);
-        }
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
         const data = (await res.json()) as AgentsStatusResponse;
         if (mountedRef.current) {
@@ -364,16 +274,10 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
         }
       } catch (err) {
         if (mountedRef.current) {
-          setError(
-            err instanceof Error
-              ? err.message
-              : "Não foi possível conectar ao orquestrador de agentes.",
-          );
+          setError(err instanceof Error ? err.message : "Erro de conexão.");
         }
       } finally {
-        if (mountedRef.current) {
-          setLoading(false);
-        }
+        if (mountedRef.current) setLoading(false);
       }
     },
     [sessionToken, onJobsBadgeChange],
@@ -384,9 +288,25 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
     void fetchStatus(false);
     const interval = window.setInterval(() => {
       void fetchStatus(false);
-    }, 3000);
+    }, 2800);
     return () => window.clearInterval(interval);
   }, [isOpen, fetchStatus]);
+
+  useEffect(() => {
+    if (isOpen && agentEventSeq) {
+      void fetchStatus(false);
+    }
+  }, [isOpen, agentEventSeq, fetchStatus]);
+
+  useEffect(() => {
+    if (!officeCommand) return;
+    if (officeCommand.view_mode === "list" || officeCommand.view_mode === "office3d") {
+      setViewMode(officeCommand.view_mode);
+    }
+    if (officeCommand.profile) {
+      setSelectedProfile(officeCommand.profile);
+    }
+  }, [officeCommand]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -397,6 +317,11 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [isOpen, onClose]);
 
+  const handleSelectAgent = (prof: HermesProfileName) => {
+    setSelectedProfile(prof);
+    if (!officeSidebarOpen) setOfficeSidebarOpen(true);
+  };
+
   const handleDelegate = async (e: FormEvent) => {
     e.preventDefault();
     const cleanTask = taskInput.trim();
@@ -404,7 +329,6 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
 
     setSubmitting(true);
     setError(null);
-    setBannerMsg(null);
     try {
       const res = await fetch("/api/agents/delegate", {
         method: "POST",
@@ -416,25 +340,14 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
           hop_count: 0,
         }),
       });
-      const body = (await res.json().catch(() => ({}))) as {
-        detail?: string;
-        requires_approval?: boolean;
-        job?: AgentJobItem;
-      };
-      if (!res.ok) {
-        throw new Error(body.detail || `Erro ao delegar missão (HTTP ${res.status}).`);
-      }
+      const body = (await res.json().catch(() => ({}))) as { detail?: string };
+      if (!res.ok) throw new Error(body.detail || `HTTP ${res.status}`);
 
       setTaskInput("");
       setContextTainted(false);
-      setBannerMsg(
-        body.requires_approval
-          ? "Contexto externo detectado: aguardando sua aprovação explícita Tier 3."
-          : `Missão enviada ao agente '${selectedProfile}'. Ao concluir, você poderá Indexar na Base de Conhecimento ou Descartar.`,
-      );
       await fetchStatus(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro ao delegar missão.");
+      setError(err instanceof Error ? err.message : "Erro ao enviar.");
     } finally {
       setSubmitting(false);
     }
@@ -443,7 +356,6 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
   const handleIndexJobToKB = async (job: AgentJobItem) => {
     setIndexingJobIds((prev) => ({ ...prev, [job.job_id]: true }));
     setError(null);
-    setBannerMsg(null);
     try {
       const res = await fetch(`/api/agents/jobs/${encodeURIComponent(job.job_id)}/index-kb`, {
         method: "POST",
@@ -452,22 +364,16 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
       });
       const body = (await res.json().catch(() => ({}))) as {
         detail?: string;
-        kb_info?: { chunks_indexados?: number; total_chunks_base?: number; arquivo?: string };
+        kb_info?: { total_chunks_base?: number };
       };
-      if (!res.ok) {
-        throw new Error(body.detail || `Falha ao indexar na Base de Conhecimento (HTTP ${res.status}).`);
+      if (!res.ok) throw new Error(body.detail || `HTTP ${res.status}`);
+      if (typeof body.kb_info?.total_chunks_base === "number") {
+        onKnowledgeIndexed?.(body.kb_info.total_chunks_base);
       }
-      const chunks = body.kb_info?.chunks_indexados ?? 1;
-      const total = body.kb_info?.total_chunks_base;
-      if (typeof total === "number") {
-        onKnowledgeIndexed?.(total);
-      }
-      setBannerMsg(
-        `Conhecimento indexado com sucesso na F.R.Y.I.Vs (${chunks} chunk(s) adicionados ao ChromaDB + BM25)!`,
-      );
+      setCelebrationSignal((s) => s + 1);
       await fetchStatus(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Falha ao indexar na Base de Conhecimento.");
+      setError(err instanceof Error ? err.message : "Falha ao indexar.");
     } finally {
       setIndexingJobIds((prev) => ({ ...prev, [job.job_id]: false }));
     }
@@ -476,28 +382,18 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
   const handleDiscardJob = async (jobId: string) => {
     setDiscardingJobIds((prev) => ({ ...prev, [jobId]: true }));
     setError(null);
-    setBannerMsg(null);
     try {
       const res = await fetch(`/api/agents/jobs/${encodeURIComponent(jobId)}/discard`, {
         method: "POST",
         headers: buildAuthHeaders(sessionToken),
       });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { detail?: string };
-        throw new Error(body.detail || `Erro ao descartar resultado (HTTP ${res.status}).`);
-      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setStatusData((prev) =>
-        prev
-          ? {
-              ...prev,
-              jobs: prev.jobs.filter((j) => j.job_id !== jobId),
-            }
-          : prev,
+        prev ? { ...prev, jobs: prev.jobs.filter((j) => j.job_id !== jobId) } : prev,
       );
-      setBannerMsg("Resultado descartado e removido da fila sem alterar a Base de Conhecimento.");
       await fetchStatus(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Falha ao descartar missão.");
+      setError(err instanceof Error ? err.message : "Falha ao descartar.");
     } finally {
       setDiscardingJobIds((prev) => ({ ...prev, [jobId]: false }));
     }
@@ -505,20 +401,12 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
 
   const handleCancelJob = async (jobId: string) => {
     setBusyJobIds((prev) => ({ ...prev, [jobId]: true }));
-    setError(null);
     try {
-      const res = await fetch(`/api/agents/jobs/${encodeURIComponent(jobId)}/cancel`, {
+      await fetch(`/api/agents/jobs/${encodeURIComponent(jobId)}/cancel`, {
         method: "POST",
         headers: buildAuthHeaders(sessionToken),
       });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { detail?: string };
-        throw new Error(body.detail || `Erro ao cancelar missão (HTTP ${res.status}).`);
-      }
-      setBannerMsg(`Missão #${jobId.slice(0, 8)} cancelada.`);
       await fetchStatus(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Falha ao cancelar missão.");
     } finally {
       setBusyJobIds((prev) => ({ ...prev, [jobId]: false }));
     }
@@ -527,26 +415,12 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
   const handleKillAll = async () => {
     if (killingAll) return;
     setKillingAll(true);
-    setError(null);
-    setBannerMsg(null);
     try {
-      const res = await fetch("/api/agents/kill-all", {
+      await fetch("/api/agents/kill-all", {
         method: "POST",
         headers: buildAuthHeaders(sessionToken),
       });
-      const body = (await res.json().catch(() => ({}))) as {
-        killed_count?: number;
-        detail?: string;
-      };
-      if (!res.ok) {
-        throw new Error(body.detail || `Falha no Kill-Switch (HTTP ${res.status}).`);
-      }
-      setBannerMsg(
-        `Kill-Switch acionado: ${body.killed_count ?? 0} missão(ões) interrompida(s) imediatamente.`,
-      );
       await fetchStatus(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Falha ao executar Kill-Switch.");
     } finally {
       setKillingAll(false);
     }
@@ -554,29 +428,13 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
 
   const handleApprovalDecision = async (approvalId: string, approved: boolean) => {
     setBusyApprovalIds((prev) => ({ ...prev, [approvalId]: true }));
-    setError(null);
-    setBannerMsg(null);
     try {
-      const res = await fetch(`/api/agents/approvals/${encodeURIComponent(approvalId)}`, {
+      await fetch(`/api/agents/approvals/${encodeURIComponent(approvalId)}`, {
         method: "POST",
         headers: buildAuthHeaders(sessionToken, { "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          approved,
-          decision: approved ? "approve" : "deny",
-        }),
+        body: JSON.stringify({ approved, decision: approved ? "approve" : "deny" }),
       });
-      const body = (await res.json().catch(() => ({}))) as { detail?: string };
-      if (!res.ok) {
-        throw new Error(body.detail || `Falha ao registrar decisão (HTTP ${res.status}).`);
-      }
-      setBannerMsg(
-        approved
-          ? `Aprovação Tier 3 (${approvalId.slice(0, 8)}) autorizada.`
-          : `Aprovação Tier 3 (${approvalId.slice(0, 8)}) negada.`,
-      );
       await fetchStatus(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Falha ao decidir aprovação Tier 3.");
     } finally {
       setBusyApprovalIds((prev) => ({ ...prev, [approvalId]: false }));
     }
@@ -587,208 +445,434 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
   const profiles = statusData?.hermes.profiles ?? DEFAULT_PROFILES;
   const jobs = statusData?.jobs ?? [];
   const pendingApprovals = statusData?.pending_approvals ?? [];
-  const budget: BudgetSnapshot = statusData?.budget ?? {
-    date: "",
+  const budget = statusData?.budget ?? {
     daily_tokens_used: 0,
     daily_usd_used: 0,
     max_usd_per_day: 5,
     usd_utilization_pct: 0,
     active_concurrent: 0,
     max_concurrent_agents: 2,
-    max_hop_count: 2,
-    max_steps_hermes: 15,
-    max_wall_time_s: 180,
-    max_tokens_per_job: 32000,
   };
 
-  const hermesState = statusData?.hermes.state ?? "native";
-  const usdPct = Math.min(100, Math.max(0, budget.usd_utilization_pct));
-  const suggestions = PROFILE_SUGGESTIONS[selectedProfile] ?? [];
+  const selectedIconName = getProfileMeta(selectedProfile).icon;
+
+  const renderJobCard = (job: AgentJobItem) => {
+    const profileMeta = getProfileMeta(job.profile);
+    const statusBadge = getStatusBadge(job.status);
+    const isActive =
+      job.status === "queued" ||
+      job.status === "running" ||
+      job.status === "awaiting_approval";
+    const cancelling = Boolean(busyJobIds[job.job_id]);
+    const indexing = Boolean(indexingJobIds[job.job_id]);
+    const discarding = Boolean(discardingJobIds[job.job_id]);
+    const isExpanded = Boolean(expandedJobIds[job.job_id]);
+    const isIndexed = job.kb_status === "indexed";
+
+    return (
+      <div
+        key={job.job_id}
+        className={`rounded-xl border p-3 space-y-2 transition-colors ${
+          isIndexed
+            ? "border-emerald-400/35 bg-[#061522]/90"
+            : "border-white/10 bg-[#071022]/92 hover:border-cyan-400/25"
+        }`}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5">
+            <span
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono uppercase border ${profileMeta.badgeClass}`}
+            >
+              <Icons8Icon name={profileMeta.icon} className="w-3 h-3" />
+              {SHORT_LABELS[job.profile]}
+            </span>
+            <span
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono border ${statusBadge.className}`}
+            >
+              {job.status === "running" && <Icons8Icon name="loader" className="w-2.5 h-2.5 animate-spin" />}
+              {job.status === "completed" && <Icons8Icon name="check-circle" className="w-2.5 h-2.5" />}
+              {statusBadge.label}
+            </span>
+          </div>
+
+          {isActive && (
+            <button
+              type="button"
+              disabled={cancelling}
+              onClick={() => void handleCancelJob(job.job_id)}
+              title="Cancelar"
+              className="p-1 rounded-lg bg-red-500/15 hover:bg-red-500/25 border border-red-400/35 text-red-200 cursor-pointer disabled:opacity-50"
+            >
+              {cancelling ? (
+                <Icons8Icon name="loader" className="w-3 h-3 animate-spin" />
+              ) : (
+                <Icons8Icon name="cancel-circle" className="w-3 h-3" />
+              )}
+            </button>
+          )}
+        </div>
+
+        <p className="text-xs font-medium text-white leading-snug">{job.task}</p>
+
+        {isActive && (
+          <div className="h-1 w-full rounded-full bg-black/60 overflow-hidden">
+            <div
+              className="h-full rounded-full bg-cyan-400 transition-all duration-500"
+              style={{ width: `${Math.min(100, Math.max(12, job.progress_pct))}%` }}
+            />
+          </div>
+        )}
+
+        {job.result && (
+          <div className="space-y-2">
+            <div
+              className={`rounded-lg bg-[#040a16] border border-white/8 px-3 py-2 text-xs text-slate-200 overflow-y-auto ${
+                isExpanded ? "max-h-[380px]" : "max-h-44"
+              }`}
+            >
+              <FormattedText content={job.result} compact />
+            </div>
+
+            <div className="flex items-center justify-between gap-1.5">
+              {job.result.length > 280 ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setExpandedJobIds((prev) => ({
+                      ...prev,
+                      [job.job_id]: !isExpanded,
+                    }))
+                  }
+                  className="inline-flex items-center gap-1 text-[10.5px] font-mono text-cyan-300 hover:text-cyan-200 cursor-pointer"
+                >
+                  {isExpanded ? (
+                    <>
+                      <Icons8Icon name="chevron-up" className="w-3 h-3" /> Menos
+                    </>
+                  ) : (
+                    <>
+                      <Icons8Icon name="chevron-down" className="w-3 h-3" /> Expandir
+                    </>
+                  )}
+                </button>
+              ) : (
+                <span />
+              )}
+
+              {job.status === "completed" && (
+                <div className="flex items-center gap-1.5 ml-auto">
+                  {isIndexed ? (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/18 border border-emerald-400/45 text-emerald-200 text-[10.5px] font-semibold">
+                      <Icons8Icon name="check-circle" className="w-3 h-3 text-emerald-400" />
+                      Indexado
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={indexing || discarding}
+                      onClick={() => void handleIndexJobToKB(job)}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/22 hover:bg-emerald-500/34 border border-emerald-400/50 text-emerald-100 text-[10.5px] font-semibold transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      {indexing ? (
+                        <Icons8Icon name="loader" className="w-3 h-3 animate-spin text-emerald-300" />
+                      ) : (
+                        <Icons8Icon name="book-add" className="w-3 h-3 text-emerald-300" />
+                      )}
+                      Indexar
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    disabled={indexing || discarding}
+                    onClick={() => void handleDiscardJob(job.job_id)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/[0.04] hover:bg-red-500/18 border border-white/12 hover:border-red-400/40 text-slate-300 hover:text-red-200 text-[10.5px] transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    {discarding ? (
+                      <Icons8Icon name="loader" className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <Icons8Icon name="trash" className="w-3 h-3" />
+                    )}
+                    Descartar
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {job.error && (
+          <div className="flex items-center justify-between gap-2 rounded-lg bg-red-500/10 border border-red-400/25 px-2.5 py-1.5 text-[11px] text-red-200">
+            <span className="truncate">{job.error}</span>
+            {!isActive && (
+              <button
+                type="button"
+                disabled={discarding}
+                onClick={() => void handleDiscardJob(job.job_id)}
+                className="p-1 rounded hover:bg-red-500/20 text-slate-200 cursor-pointer"
+              >
+                <Icons8Icon name="trash" className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div
-      className="fixed inset-0 z-50 flex justify-end bg-[#02060f]/80 backdrop-blur-xl"
+      className="fixed inset-0 z-50 flex flex-col bg-[#030711]/96 text-slate-200 backdrop-blur-2xl"
       role="dialog"
       aria-modal="true"
       aria-labelledby="agents-control-panel-title"
-      onClick={onClose}
     >
-      <div
-        className="relative w-full max-w-2xl h-full flex flex-col border-l border-cyan-400/25 bg-[#050b18]/96 text-slate-200 shadow-[0_0_90px_rgba(6,182,212,0.18)]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header Compacto */}
-        <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-white/10 bg-[#060f22]/92">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-cyan-500/15 border border-cyan-400/35 flex items-center justify-center shrink-0">
-              <Bot className="w-5 h-5 text-cyan-300" />
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h2
-                  id="agents-control-panel-title"
-                  className="text-sm font-bold tracking-[0.16em] uppercase text-white truncate"
-                >
-                  Esquadrão de Agentes
-                </h2>
-                <span
-                  className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono uppercase tracking-wider border ${
-                    hermesState === "online" || hermesState === "native"
-                      ? "bg-emerald-500/15 border-emerald-400/40 text-emerald-300"
-                      : hermesState === "offline"
-                        ? "bg-red-500/15 border-red-400/35 text-red-300"
-                        : "bg-cyan-500/12 border-cyan-400/30 text-cyan-300"
-                  }`}
-                >
-                  <span
-                    className={`w-1.5 h-1.5 rounded-full ${
-                      hermesState === "online" || hermesState === "native"
-                        ? "bg-emerald-400 animate-pulse"
-                        : hermesState === "offline"
-                          ? "bg-red-400"
-                          : "bg-cyan-400"
-                    }`}
-                  />
-                  {hermesState === "online"
-                    ? "Hermes WSL2 Online"
-                    : hermesState === "native"
-                      ? "Motor Nativo Ativo"
-                      : hermesState === "offline"
-                        ? "Offline"
-                        : "Standby"}
-                </span>
-              </div>
-              <p className="text-[11px] font-mono text-slate-400 truncate mt-0.5">
-                Pesquisador · Organizador de Dados · Agente de Ideias · Engenheiro
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={() => void fetchStatus(true)}
-              disabled={loading}
-              title="Atualizar status dos agentes"
-              className="p-2 rounded-xl border border-white/10 bg-white/5 hover:border-cyan-400/40 hover:text-cyan-300 text-slate-400 transition-all cursor-pointer disabled:opacity-50"
-            >
-              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin text-cyan-300" : ""}`} />
-            </button>
-
-            <button
-              type="button"
-              onClick={() => void handleKillAll()}
-              disabled={killingAll}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-red-500/18 hover:bg-red-500/28 border border-red-400/45 text-red-200 hover:text-white text-[11px] font-bold uppercase tracking-wider transition-all cursor-pointer disabled:opacity-50"
-            >
-              {killingAll ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <OctagonX className="w-3.5 h-3.5 text-red-300" />
-              )}
-              Kill All
-            </button>
-
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Fechar painel de agentes"
-              className="p-2 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-all cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-
-        {/* Barra Compacta de Governança (Budget + Segurança em 1 linha) */}
-        <div className="px-6 py-2.5 border-b border-white/8 bg-[#040916] flex items-center justify-between gap-3 flex-wrap text-[10px] font-mono">
-          <div className="flex items-center gap-3">
-            <span className="inline-flex items-center gap-1.5 text-slate-300">
-              <Gauge className="w-3.5 h-3.5 text-cyan-400" />
-              US$ {budget.daily_usd_used.toFixed(4)} / {budget.max_usd_per_day.toFixed(2)} ({usdPct.toFixed(0)}%)
-            </span>
-            <span className="inline-flex items-center gap-1 text-cyan-300">
-              <Cpu className="w-3 h-3" />
-              Ativos: {budget.active_concurrent}/{budget.max_concurrent_agents}
-            </span>
-          </div>
-          <span className="inline-flex items-center gap-1 text-emerald-300/90">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            {pendingApprovals.length === 0
-              ? "Tier 3 Limpo · Curadoria Humana Ativa"
-              : `${pendingApprovals.length} Aprovação(ões) Tier 3 Pendente(s)`}
+      {/* Top Bar Minimalista */}
+      <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-white/10 bg-[#050c1d]/95 shrink-0">
+        <div className="flex items-center gap-2.5">
+          <Icons8Icon name="bot" className="w-4 h-4 text-cyan-300" />
+          <h2
+            id="agents-control-panel-title"
+            className="text-xs font-bold tracking-[0.18em] uppercase text-white"
+          >
+            Agentes
+          </h2>
+          <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-white/5 border border-white/10 text-slate-300">
+            {budget.active_concurrent}/{budget.max_concurrent_agents}
           </span>
         </div>
 
-        {/* Corpo Rolável */}
-        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
-          {error && (
-            <div className="rounded-xl bg-red-500/12 border border-red-400/35 px-4 py-3 text-xs text-red-200 flex items-start gap-2.5">
-              <ShieldAlert className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-              <span>{error}</span>
-            </div>
-          )}
+        {/* Abas curtas: 3D vs Fila */}
+        <div className="flex items-center gap-1 p-0.5 rounded-xl bg-black/55 border border-white/10">
+          <button
+            type="button"
+            onClick={() => setViewMode("office3d")}
+            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              viewMode === "office3d"
+                ? "bg-cyan-400 text-slate-950"
+                : "text-slate-300 hover:text-white"
+            }`}
+          >
+            <Icons8Icon name="building" className="w-3.5 h-3.5" />
+            3D
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("list")}
+            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              viewMode === "list"
+                ? "bg-cyan-400 text-slate-950"
+                : "text-slate-300 hover:text-white"
+            }`}
+          >
+            <Icons8Icon name="layout-list" className="w-3.5 h-3.5" />
+            Fila ({jobs.length})
+          </button>
+        </div>
 
-          {bannerMsg && (
-            <div className="rounded-xl bg-emerald-500/12 border border-emerald-400/35 px-4 py-3 text-xs text-emerald-100 flex items-start gap-2.5">
-              <Sparkles className="w-4 h-4 text-emerald-300 shrink-0 mt-0.5" />
-              <span>{bannerMsg}</span>
-            </div>
-          )}
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => void fetchStatus(true)}
+            disabled={loading}
+            title="Atualizar"
+            className="p-2 rounded-xl border border-white/10 bg-white/5 hover:text-cyan-300 text-slate-400 cursor-pointer disabled:opacity-50"
+          >
+            <Icons8Icon name="refresh" className={`w-3.5 h-3.5 ${loading ? "animate-spin text-cyan-300" : ""}`} />
+          </button>
 
-          {/* Aprovações Tier 3 — Só expande quando realmente houver pendência! */}
-          {pendingApprovals.length > 0 && (
-            <section className="rounded-2xl border border-amber-400/40 bg-amber-500/[0.06] p-4 space-y-3">
-              <div className="flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => void handleKillAll()}
+            disabled={killingAll}
+            title="Parar todos os agentes"
+            className="p-2 rounded-xl bg-red-500/18 hover:bg-red-500/28 border border-red-400/45 text-red-200 cursor-pointer disabled:opacity-50"
+          >
+            {killingAll ? (
+              <Icons8Icon name="loader" className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Icons8Icon name="stop-all" className="w-3.5 h-3.5" />
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Fechar"
+            title="Fechar"
+            className="p-2 rounded-xl border border-white/12 bg-white/6 hover:bg-white/12 text-slate-200 cursor-pointer"
+          >
+            <Icons8Icon name="close" className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
+      {viewMode === "office3d" ? (
+        <div className="flex-1 min-h-0 flex relative overflow-hidden">
+          <div className="flex-1 min-w-0 relative flex flex-col">
+            <AgentsOffice3D
+              jobs={jobs}
+              selectedProfile={selectedProfile}
+              onSelectProfile={handleSelectAgent}
+              celebrationSignal={celebrationSignal}
+              externalCommand={officeCommand}
+            />
+
+            {!officeSidebarOpen && (
+              <button
+                type="button"
+                onClick={() => setOfficeSidebarOpen(true)}
+                className="absolute top-3 right-3 z-20 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#060d1d]/90 hover:bg-[#09152e] border border-cyan-400/40 text-cyan-200 text-xs font-semibold backdrop-blur-xl cursor-pointer"
+              >
+                <Icons8Icon name="panel-right" className="w-3.5 h-3.5" />
+                {jobs.length > 0 ? `${jobs.length}` : ""}
+              </button>
+            )}
+
+            {/* Dock Inferior de 1 Linha (Sem descrições longas) */}
+            <div className="absolute bottom-3.5 inset-x-4 z-20 flex justify-center pointer-events-none">
+              <div className="inline-flex items-center gap-1.5 p-1.5 rounded-2xl bg-[#050b18]/88 border border-white/12 backdrop-blur-2xl pointer-events-auto flex-wrap justify-center">
+                {profiles.map((prof) => {
+                  const meta = getProfileMeta(prof.name);
+                  const isSelected = selectedProfile === prof.name;
+                  const activeJob = jobs.some(
+                    (j) =>
+                      j.profile === prof.name &&
+                      (j.status === "running" || j.status === "queued"),
+                  );
+                  const readyCount = jobs.filter(
+                    (j) =>
+                      j.profile === prof.name &&
+                      j.status === "completed" &&
+                      j.kb_status !== "indexed",
+                  ).length;
+
+                  return (
+                    <button
+                      key={prof.name}
+                      type="button"
+                      onClick={() => handleSelectAgent(prof.name)}
+                      className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
+                        isSelected
+                          ? `${meta.selectedBorder} text-white`
+                          : "border-transparent text-slate-300 hover:bg-white/6 hover:text-white"
+                      }`}
+                    >
+                      <Icons8Icon name={meta.icon} className={`w-3.5 h-3.5 ${meta.accentText}`} />
+                      <span>{SHORT_LABELS[prof.name]}</span>
+                      {activeJob ? (
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                      ) : readyCount > 0 ? (
+                        <span className="min-w-[16px] h-4 px-1 rounded-full bg-emerald-400 text-slate-950 text-[9px] font-mono font-bold flex items-center justify-center">
+                          {readyCount}
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Painel Lateral Enxuto */}
+          {officeSidebarOpen && (
+            <aside className="w-full sm:w-[360px] shrink-0 h-full border-l border-white/10 bg-[#050b18]/96 backdrop-blur-3xl flex flex-col z-20">
+              <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/8 bg-[#061022]">
                 <div className="flex items-center gap-2">
-                  <ShieldAlert className="w-4 h-4 text-amber-300" />
-                  <h3 className="text-[11px] font-mono uppercase tracking-[0.18em] text-amber-200 font-semibold">
-                    Aprovações Tier 3 Pendentes ({pendingApprovals.length})
+                  <Icons8Icon
+                    name={selectedIconName}
+                    className={`w-4 h-4 ${getProfileMeta(selectedProfile).accentText}`}
+                  />
+                  <h3 className="text-xs font-bold text-white uppercase tracking-wider">
+                    {SHORT_LABELS[selectedProfile]}
                   </h3>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setOfficeSidebarOpen(false)}
+                  title="Ocultar painel"
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/8 cursor-pointer"
+                >
+                  <Icons8Icon name="chevron-right" className="w-4 h-4" />
+                </button>
               </div>
 
-              <div className="space-y-2.5">
+              <div className="p-3 border-b border-white/8">
+                <form onSubmit={handleDelegate} className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    value={taskInput}
+                    onChange={(e) => setTaskInput(e.target.value)}
+                    placeholder={`Missão para ${SHORT_LABELS[selectedProfile]}...`}
+                    disabled={submitting}
+                    className="flex-1 rounded-xl bg-black/65 border border-white/12 focus:border-cyan-400/60 px-3 py-2 text-xs text-white placeholder-slate-500 outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setContextTainted((v) => !v)}
+                    title={
+                      contextTainted
+                        ? "Contexto externo ativo (exigirá aprovação Tier 3)"
+                        : "Marcar contexto externo"
+                    }
+                    className={`p-2 rounded-xl border transition-colors cursor-pointer ${
+                      contextTainted
+                        ? "bg-amber-500/22 border-amber-400/50 text-amber-200"
+                        : "bg-white/[0.03] border-white/10 text-slate-500 hover:text-slate-300"
+                    }`}
+                  >
+                    <Icons8Icon name="alert-triangle" className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!taskInput.trim() || submitting}
+                    className="p-2 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-bold transition-all cursor-pointer disabled:opacity-40"
+                    title="Enviar missão"
+                  >
+                    {submitting ? (
+                      <Icons8Icon name="loader" className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Icons8Icon name="send" className="w-4 h-4" />
+                    )}
+                  </button>
+                </form>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
+                {error && (
+                  <div className="rounded-lg bg-red-500/12 border border-red-400/35 px-3 py-2 text-xs text-red-200 flex items-center gap-2">
+                    <Icons8Icon name="shield-alert" className="w-3.5 h-3.5 text-red-400 shrink-0" />
+                    <span>{error}</span>
+                  </div>
+                )}
+
                 {pendingApprovals.map((item) => {
                   const busy = Boolean(busyApprovalIds[item.approval_id]);
                   return (
                     <div
                       key={item.approval_id}
-                      className="rounded-xl border border-amber-400/35 bg-[#071022]/95 p-3.5 space-y-2.5"
+                      className="rounded-xl border border-amber-400/40 bg-amber-500/10 p-3 space-y-2"
                     >
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-bold font-mono text-white">{item.tool}</span>
-                        <span className="px-2 py-0.5 rounded-full text-[9px] font-mono uppercase bg-red-500/20 border border-red-400/40 text-red-200">
-                          Tier {item.tier}
-                        </span>
-                        {item.context_tainted && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-mono uppercase bg-amber-500/25 border border-amber-400/50 text-amber-200">
-                            <AlertTriangle className="w-2.5 h-2.5" />
-                            Contexto Externo
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[11px] text-slate-300 leading-relaxed">{item.reason}</p>
-                      <div className="flex items-center justify-end gap-2 pt-1">
+                      <p className="text-xs font-semibold text-amber-100">Tier 3 · {item.tool}</p>
+                      <div className="flex justify-end gap-1.5">
                         <button
                           type="button"
                           disabled={busy}
                           onClick={() => void handleApprovalDecision(item.approval_id, false)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/15 hover:bg-red-500/25 border border-red-400/40 text-red-200 text-[11px] font-semibold transition-all cursor-pointer disabled:opacity-50"
+                          className="px-2.5 py-1 rounded-lg bg-red-500/20 border border-red-400/40 text-red-200 text-[11px] cursor-pointer"
                         >
-                          <XCircle className="w-3.5 h-3.5" />
                           Negar
                         </button>
                         <button
                           type="button"
                           disabled={busy}
                           onClick={() => void handleApprovalDecision(item.approval_id, true)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/45 text-emerald-200 text-[11px] font-semibold transition-all cursor-pointer disabled:opacity-50"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/25 border border-emerald-400/45 text-emerald-100 text-[11px] font-semibold cursor-pointer"
                         >
                           {busy ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <Icons8Icon name="loader" className="w-3 h-3 animate-spin" />
                           ) : (
-                            <Check className="w-3.5 h-3.5" />
+                            <Icons8Icon name="check" className="w-3 h-3" />
                           )}
                           Aprovar
                         </button>
@@ -796,326 +880,34 @@ export const AgentsControlPanel: FC<AgentsControlPanelProps> = ({
                     </div>
                   );
                 })}
+
+                {jobs.length === 0 ? (
+                  <p className="py-10 text-center text-xs text-slate-500 font-mono">Sem missões.</p>
+                ) : (
+                  jobs.map(renderJobCard)
+                )}
               </div>
-            </section>
+            </aside>
           )}
-
-          {/* 1. Seleção dos 4 Agentes + Delegação Imediata */}
-          <section className="rounded-2xl border border-white/10 bg-white/[0.025] p-4 space-y-3.5">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {profiles.map((prof) => {
-                const meta = getProfileMeta(prof.name);
-                const Icon = meta.icon;
-                const isSelected = selectedProfile === prof.name;
-                return (
-                  <button
-                    key={prof.name}
-                    type="button"
-                    onClick={() => setSelectedProfile(prof.name)}
-                    className={`text-left rounded-xl p-3 border transition-all cursor-pointer ${
-                      isSelected
-                        ? meta.selectedBorder
-                        : "border-white/10 bg-black/35 hover:border-white/25 hover:bg-white/[0.04]"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2 mb-1">
-                      <span className="inline-flex items-center gap-1.5 text-xs font-bold text-white">
-                        <Icon className={`w-3.5 h-3.5 ${meta.accentText}`} />
-                        {prof.label}
-                      </span>
-                      <span className="text-[9px] font-mono text-slate-400">
-                        ≤ {prof.default_max_steps} passos
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-slate-300/90 leading-snug line-clamp-2">
-                      {prof.mission}
-                    </p>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Sugestões rápidas contextualizadas por agente */}
-            <div className="flex flex-wrap gap-1.5 pt-0.5">
-              {suggestions.map((sug, idx) => (
-                <button
-                  key={idx}
-                  type="button"
-                  onClick={() => setTaskInput(sug)}
-                  className="px-2.5 py-1 rounded-lg bg-white/[0.04] hover:bg-cyan-500/12 border border-white/8 hover:border-cyan-400/35 text-[10.5px] text-slate-300 hover:text-cyan-200 transition-colors cursor-pointer"
-                >
-                  {sug}
-                </button>
-              ))}
-            </div>
-
-            <form onSubmit={handleDelegate} className="space-y-2.5 pt-1">
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={taskInput}
-                  onChange={(e) => setTaskInput(e.target.value)}
-                  placeholder={`Descreva a missão para '${
-                    profiles.find((p) => p.name === selectedProfile)?.label ?? selectedProfile
-                  }'...`}
-                  disabled={submitting}
-                  className="flex-1 rounded-xl bg-black/65 border border-white/12 focus:border-cyan-400/60 px-3.5 py-2.5 text-xs text-white placeholder-slate-500 outline-none transition-all"
-                />
-                <button
-                  type="submit"
-                  disabled={!taskInput.trim() || submitting}
-                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-bold text-[11px] uppercase tracking-wider transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  {submitting ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Send className="w-3.5 h-3.5" />
-                  )}
-                  Delegar
-                </button>
-              </div>
-
-              <label className="inline-flex items-center gap-2 text-[11px] text-slate-400 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={contextTainted}
-                  onChange={(e) => setContextTainted(e.target.checked)}
-                  className="rounded border-white/20 bg-black/60 accent-amber-400"
-                />
-                <span>
-                  Contexto externo não confiável (exige confirmação humana Tier 3 antes de executar)
-                </span>
-              </label>
-            </form>
-          </section>
-
-          {/* 2. Resultados & Curadoria para a Base de Conhecimento */}
-          <section className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Activity className="w-4 h-4 text-cyan-300" />
-                <h3 className="text-[11px] font-mono uppercase tracking-[0.18em] text-cyan-200 font-semibold">
-                  Missões & Curadoria ({jobs.length})
-                </h3>
-              </div>
-              <span className="text-[10px] font-mono text-slate-500">Tempo real · 3s</span>
-            </div>
-
-            {jobs.length === 0 ? (
-              <div className="rounded-2xl border border-white/8 bg-white/[0.02] px-4 py-7 text-center text-xs text-slate-400">
-                Nenhuma missão na fila. Escolha um dos 4 agentes acima para pesquisar, organizar
-                dados, gerar ideias para a F.R.Y.I.Vs ou auditar a engenharia.
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {jobs.map((job) => {
-                  const profileMeta = getProfileMeta(job.profile);
-                  const ProfileIcon = profileMeta.icon;
-                  const statusBadge = getStatusBadge(job.status);
-                  const isActive =
-                    job.status === "queued" ||
-                    job.status === "running" ||
-                    job.status === "awaiting_approval";
-                  const cancelling = Boolean(busyJobIds[job.job_id]);
-                  const indexing = Boolean(indexingJobIds[job.job_id]);
-                  const discarding = Boolean(discardingJobIds[job.job_id]);
-                  const isExpanded = Boolean(expandedJobIds[job.job_id]);
-                  const isIndexed = job.kb_status === "indexed";
-
-                  return (
-                    <div
-                      key={job.job_id}
-                      className={`rounded-2xl border p-4 space-y-3 transition-colors ${
-                        isIndexed
-                          ? "border-emerald-400/35 bg-[#061522]/90"
-                          : "border-white/10 bg-[#071022]/88 hover:border-cyan-400/25"
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span
-                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono uppercase border ${profileMeta.badgeClass}`}
-                          >
-                            <ProfileIcon className="w-3 h-3" />
-                            {job.profile}
-                          </span>
-                          <span
-                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono border ${statusBadge.className}`}
-                          >
-                            {job.status === "running" && (
-                              <Loader2 className="w-2.5 h-2.5 animate-spin" />
-                            )}
-                            {job.status === "completed" && <CheckCircle2 className="w-2.5 h-2.5" />}
-                            {statusBadge.label}
-                          </span>
-                          <span className="text-[10px] font-mono text-slate-500">
-                            #{job.job_id.slice(0, 8)}
-                          </span>
-                          {job.transport === "native_fryivs" && (
-                            <span className="px-2 py-0.5 rounded-full text-[9px] font-mono uppercase bg-cyan-500/12 border border-cyan-400/30 text-cyan-300">
-                              Motor Nativo
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className="inline-flex items-center gap-1 text-[10px] font-mono text-slate-400">
-                            <Clock className="w-3 h-3 text-slate-500" />
-                            {formatElapsed(job.elapsed_seconds)}
-                          </span>
-                          {isActive && (
-                            <button
-                              type="button"
-                              disabled={cancelling}
-                              onClick={() => void handleCancelJob(job.job_id)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-red-500/15 hover:bg-red-500/25 border border-red-400/35 text-red-200 text-[10px] font-semibold transition-all cursor-pointer disabled:opacity-50"
-                            >
-                              {cancelling ? (
-                                <Loader2 className="w-3 h-3 animate-spin" />
-                              ) : (
-                                <XCircle className="w-3 h-3" />
-                              )}
-                              Cancelar
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      <p className="text-xs font-medium text-white leading-relaxed">{job.task}</p>
-
-                      {/* Barra de progresso */}
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between text-[10px] font-mono text-slate-400">
-                          <span>
-                            Passos: {job.steps_completed}/{job.max_steps} · Hop {job.hop_count}
-                          </span>
-                          <span>
-                            {job.tokens_used.toLocaleString("pt-BR")} tok · US${" "}
-                            {job.estimated_usd.toFixed(4)} · {job.progress_pct}%
-                          </span>
-                        </div>
-                        <div className="h-1.5 w-full rounded-full bg-black/60 overflow-hidden border border-white/8">
-                          <div
-                            className={`h-full rounded-full transition-all duration-500 ${
-                              job.status === "failed" || job.status === "killed"
-                                ? "bg-red-500"
-                                : job.status === "completed"
-                                  ? "bg-emerald-400"
-                                  : "bg-cyan-400"
-                            }`}
-                            style={{ width: `${Math.min(100, Math.max(0, job.progress_pct))}%` }}
-                          />
-                        </div>
-                      </div>
-
-                      {/* Relatório formatado + Ações de Curadoria (Indexar ou Descartar) */}
-                      {job.result && (
-                        <div className="space-y-2.5">
-                          <div
-                            className={`rounded-xl bg-[#040a16] border border-white/10 px-3.5 py-3 text-xs text-slate-200 overflow-y-auto transition-all ${
-                              isExpanded ? "max-h-[420px]" : "max-h-52"
-                            }`}
-                          >
-                            <FormattedText content={job.result} compact />
-                          </div>
-
-                          <div className="flex items-center justify-between gap-2 flex-wrap pt-0.5">
-                            {job.result.length > 360 ? (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setExpandedJobIds((prev) => ({
-                                    ...prev,
-                                    [job.job_id]: !isExpanded,
-                                  }))
-                                }
-                                className="inline-flex items-center gap-1 text-[11px] font-mono text-cyan-300 hover:text-cyan-200 cursor-pointer"
-                              >
-                                {isExpanded ? (
-                                  <>
-                                    <ChevronUp className="w-3.5 h-3.5" /> Recolher leitura
-                                  </>
-                                ) : (
-                                  <>
-                                    <ChevronDown className="w-3.5 h-3.5" /> Expandir relatório completo
-                                  </>
-                                )}
-                              </button>
-                            ) : (
-                              <span />
-                            )}
-
-                            {job.status === "completed" && (
-                              <div className="flex items-center gap-2 ml-auto">
-                                {isIndexed ? (
-                                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/18 border border-emerald-400/45 text-emerald-200 text-[11px] font-semibold">
-                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                                    Indexado na Base ({job.kb_chunks || 1} chunks)
-                                  </span>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    disabled={indexing || discarding}
-                                    onClick={() => void handleIndexJobToKB(job)}
-                                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-500/22 hover:bg-emerald-500/32 border border-emerald-400/50 text-emerald-100 text-[11px] font-semibold transition-all cursor-pointer disabled:opacity-50"
-                                  >
-                                    {indexing ? (
-                                      <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-300" />
-                                    ) : (
-                                      <BookPlus className="w-3.5 h-3.5 text-emerald-300" />
-                                    )}
-                                    Indexar na Base de Conhecimento
-                                  </button>
-                                )}
-
-                                <button
-                                  type="button"
-                                  disabled={indexing || discarding}
-                                  onClick={() => void handleDiscardJob(job.job_id)}
-                                  title={
-                                    isIndexed
-                                      ? "Limpar este card da visualização (mantém o documento já indexado)"
-                                      : "Descartar resultado sem salvar na Base de Conhecimento"
-                                  }
-                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/[0.04] hover:bg-red-500/18 border border-white/12 hover:border-red-400/40 text-slate-300 hover:text-red-200 text-[11px] font-medium transition-all cursor-pointer disabled:opacity-50"
-                                >
-                                  {discarding ? (
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                  ) : (
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  )}
-                                  Descartar
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      {job.error && (
-                        <div className="flex items-center justify-between gap-2 rounded-xl bg-red-500/10 border border-red-400/25 px-3 py-2 text-[11px] text-red-200/95">
-                          <span>{job.error}</span>
-                          {!isActive && (
-                            <button
-                              type="button"
-                              disabled={discarding}
-                              onClick={() => void handleDiscardJob(job.job_id)}
-                              className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/5 hover:bg-red-500/20 border border-white/10 text-[10px] text-slate-200 cursor-pointer"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                              Descartar
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </section>
         </div>
-      </div>
+      ) : (
+        /* MODO LISTA MINIMALISTA */
+        <div className="flex-1 overflow-y-auto px-5 py-5">
+          <div className="max-w-3xl mx-auto space-y-3">
+            <div className="flex items-center justify-between text-xs font-mono text-slate-400 px-1">
+              <span>Missões ({jobs.length})</span>
+              <span>
+                US$ {budget.daily_usd_used.toFixed(4)} / {budget.max_usd_per_day.toFixed(2)}
+              </span>
+            </div>
+            {jobs.length === 0 ? (
+              <p className="py-12 text-center text-xs text-slate-500 font-mono">Sem missões.</p>
+            ) : (
+              jobs.map(renderJobCard)
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

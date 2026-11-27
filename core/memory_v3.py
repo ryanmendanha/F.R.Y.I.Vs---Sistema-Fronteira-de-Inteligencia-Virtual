@@ -62,8 +62,10 @@ SEMANTIC_DEDUP_MAX_DISTANCE: Final[float] = 0.12  # cosine similarity >= 0.88
 EPISODIC_DEDUP_MAX_DISTANCE: Final[float] = 0.04  # cosine similarity >= 0.96
 DEFAULT_MAX_SESSION_TURNS: Final[int] = 20
 
+from core.runtime_mode import get_sessions_db_path
+
 _RAIZ_FRYIVS: Final[Path] = Path(__file__).resolve().parent.parent
-DEFAULT_SESSIONS_DB_PATH: Final[Path] = _RAIZ_FRYIVS / "data" / "sessions.db"
+DEFAULT_SESSIONS_DB_PATH: Final[Path] = get_sessions_db_path()
 
 
 # ---------------------------------------------------------------------------

@@ -1,16 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import {
-  BookOpen,
-  CheckCircle2,
-  Database,
-  FileText,
-  Loader2,
-  RefreshCw,
-  Search,
-  ShieldCheck,
-  Sparkles,
-  X,
-} from "lucide-react";
+import { Icons8Icon } from "@/components/Icons8Icon";
 import { FormattedText } from "@/components/FormattedText";
 
 export interface KnowledgeBaseDrawerProps {
@@ -170,7 +159,7 @@ export const KnowledgeBaseDrawer: React.FC<KnowledgeBaseDrawerProps> = ({
         <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-white/10 bg-[#061120]/90">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-400/35 flex items-center justify-center shrink-0">
-              <BookOpen className="w-5 h-5 text-emerald-300" />
+              <Icons8Icon name="book-open" className="w-5 h-5 text-emerald-300" />
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2">
@@ -198,7 +187,10 @@ export const KnowledgeBaseDrawer: React.FC<KnowledgeBaseDrawerProps> = ({
               title="Sincronizar e reindexar documentos"
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-white/12 bg-white/5 hover:border-emerald-400/40 hover:text-emerald-200 text-[11px] font-mono text-slate-300 transition-all cursor-pointer disabled:opacity-50"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${reindexing ? "animate-spin text-emerald-300" : ""}`} />
+              <Icons8Icon
+                name="refresh"
+                className={`w-3.5 h-3.5 ${reindexing ? "animate-spin text-emerald-300" : ""}`}
+              />
               Sincronizar
             </button>
             <button
@@ -207,7 +199,7 @@ export const KnowledgeBaseDrawer: React.FC<KnowledgeBaseDrawerProps> = ({
               aria-label="Fechar Base de Conhecimento"
               className="p-2 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-all cursor-pointer"
             >
-              <X className="w-4 h-4" />
+              <Icons8Icon name="close" className="w-4 h-4" />
             </button>
           </div>
         </div>
@@ -215,7 +207,7 @@ export const KnowledgeBaseDrawer: React.FC<KnowledgeBaseDrawerProps> = ({
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
           {feedback && (
             <div className="rounded-xl bg-emerald-500/12 border border-emerald-400/35 px-3.5 py-2.5 text-xs text-emerald-200 flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <Icons8Icon name="check-circle" className="w-4 h-4 text-emerald-400 shrink-0" />
               <span>{feedback}</span>
             </div>
           )}
@@ -252,7 +244,10 @@ export const KnowledgeBaseDrawer: React.FC<KnowledgeBaseDrawerProps> = ({
           <section className="space-y-2.5">
             <form onSubmit={handleSearch} className="flex gap-2">
               <div className="relative flex-1">
-                <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <Icons8Icon
+                  name="search"
+                  className="w-3.5 h-3.5 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2"
+                />
                 <input
                   type="text"
                   value={query}
@@ -266,7 +261,7 @@ export const KnowledgeBaseDrawer: React.FC<KnowledgeBaseDrawerProps> = ({
                 disabled={!query.trim() || searching}
                 className="px-4 py-2.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/45 text-emerald-200 font-semibold text-xs transition-all cursor-pointer disabled:opacity-40"
               >
-                {searching ? <Loader2 className="w-4 h-4 animate-spin" /> : "Buscar"}
+                {searching ? <Icons8Icon name="loader" className="w-4 h-4 animate-spin" /> : "Buscar"}
               </button>
             </form>
 
@@ -281,7 +276,7 @@ export const KnowledgeBaseDrawer: React.FC<KnowledgeBaseDrawerProps> = ({
           <section className="space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
-                <Database className="w-3.5 h-3.5 text-emerald-300" />
+                <Icons8Icon name="database" className="w-3.5 h-3.5 text-emerald-300" />
                 <h3 className="text-[11px] font-mono uppercase tracking-[0.18em] text-slate-300 font-semibold">
                   Acervo Indexado ({visibleDocs.length})
                 </h3>
@@ -315,13 +310,13 @@ export const KnowledgeBaseDrawer: React.FC<KnowledgeBaseDrawerProps> = ({
 
             {loading ? (
               <div className="py-10 flex items-center justify-center text-slate-400 text-xs gap-2">
-                <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+                <Icons8Icon name="loader" className="w-4 h-4 animate-spin text-emerald-400" />
                 Carregando acervo...
               </div>
             ) : visibleDocs.length === 0 ? (
               <div className="rounded-xl border border-white/8 bg-white/[0.02] px-4 py-8 text-center text-xs text-slate-400">
                 {filterMode === "curated"
-                  ? "Nenhuma pesquisa de agente indexada ainda. Delegue uma pesquisa no painel Agentes e clique em 'Indexar na Base de Conhecimento'."
+                  ? "Nenhuma pesquisa de agente indexada ainda. Delegue uma pesquisa no painel Agentes e clique em 'Indexar'."
                   : "Nenhum documento encontrado na pasta base_conhecimento."}
               </div>
             ) : (
@@ -333,13 +328,13 @@ export const KnowledgeBaseDrawer: React.FC<KnowledgeBaseDrawerProps> = ({
                   >
                     <div className="min-w-0 space-y-1">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <FileText className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <Icons8Icon name="file-text" className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                         <span className="text-xs font-semibold text-slate-100 truncate">
                           {doc.nome}
                         </span>
                         {doc.curado_por_agente && (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-mono uppercase bg-cyan-500/15 border border-cyan-400/35 text-cyan-200">
-                            <Sparkles className="w-2.5 h-2.5" />
+                            <Icons8Icon name="sparkles" className="w-2.5 h-2.5" />
                             {doc.agente || "Agente"}
                           </span>
                         )}
@@ -352,7 +347,7 @@ export const KnowledgeBaseDrawer: React.FC<KnowledgeBaseDrawerProps> = ({
                         {formatBytes(doc.tamanho_bytes)}
                       </span>
                       <span className="inline-flex items-center gap-1 text-[9px] font-mono text-emerald-300/80">
-                        <ShieldCheck className="w-2.5 h-2.5" />
+                        <Icons8Icon name="shield-check" className="w-2.5 h-2.5" />
                         {doc.trust_level === "verified_internal" ? "Interno" : "Sanitizado"}
                       </span>
                     </div>
@@ -368,4 +363,3 @@ export const KnowledgeBaseDrawer: React.FC<KnowledgeBaseDrawerProps> = ({
 };
 
 export default KnowledgeBaseDrawer;
-

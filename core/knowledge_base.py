@@ -31,6 +31,7 @@ from core.memory_v3 import (
     sanitizar_conteudo_externo,
 )
 from core.policy_engine import redact_secrets
+from core.runtime_mode import get_data_dir
 
 _RAIZ_FRYIVS = Path(__file__).resolve().parent.parent
 BASE_CONHECIMENTO_PATH: Path = (
@@ -39,14 +40,42 @@ BASE_CONHECIMENTO_PATH: Path = (
 
 COLECAO_NOME: str = "fryvis_base_conhecimento"
 
-_MANIFEST_PATH: Path = _RAIZ_FRYIVS / "data" / "kb_manifest.json"
+_DEFAULT_MANIFEST_PATH: Path = _RAIZ_FRYIVS / "data" / "kb_manifest.json"
+_MANIFEST_PATH: Path = _DEFAULT_MANIFEST_PATH
+
+
+def _get_manifest_path() -> Path:
+    if _MANIFEST_PATH != _DEFAULT_MANIFEST_PATH:
+        return _MANIFEST_PATH
+    data_dir = get_data_dir()
+    if data_dir.resolve() != _RAIZ_FRYIVS.resolve():
+        return data_dir / "data" / "kb_manifest.json"
+    return _MANIFEST_PATH
+
+
+def _get_extra_kb_root() -> Path | None:
+    data_dir = get_data_dir()
+    if data_dir.resolve() != _RAIZ_FRYIVS.resolve():
+        return data_dir / "kb_curados"
+    return None
+
+
+def _rel_kb_path(arq: Path) -> Path:
+    extra = _get_extra_kb_root()
+    if extra is not None:
+        try:
+            return arq.relative_to(extra)
+        except ValueError:
+            pass
+    return arq.relative_to(BASE_CONHECIMENTO_PATH)
 
 
 def _ler_manifesto() -> dict[str, str]:
     """Carrega manifesto {arquivo_relativo: sha256} do disco."""
+    mf = _get_manifest_path()
     try:
-        if _MANIFEST_PATH.exists():
-            return json.loads(_MANIFEST_PATH.read_text(encoding="utf-8"))
+        if mf.exists():
+            return json.loads(mf.read_text(encoding="utf-8"))
     except Exception:
         pass
     return {}
@@ -54,11 +83,12 @@ def _ler_manifesto() -> dict[str, str]:
 
 def _salvar_manifesto(manifesto: dict[str, str]) -> None:
     """Persiste manifesto no disco de forma atômica."""
+    mf = _get_manifest_path()
     try:
-        _MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
-        tmp = _MANIFEST_PATH.with_suffix(".json.tmp")
+        mf.parent.mkdir(parents=True, exist_ok=True)
+        tmp = mf.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(manifesto, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp.replace(_MANIFEST_PATH)
+        tmp.replace(mf)
     except Exception as e:
         print(f"[KnowledgeBase] Aviso: nao foi possivel salvar manifesto: {e}")
 
@@ -326,20 +356,26 @@ def _quebrar_texto(
 
 
 def _listar_arquivos() -> list[Path]:
-    """Lista arquivos validos da base de conhecimento."""
-    if not BASE_CONHECIMENTO_PATH.exists():
-        return []
+    """Lista arquivos validos da base de conhecimento (repositório + volume persistente)."""
+    raizes: list[Path] = []
+    if BASE_CONHECIMENTO_PATH.exists():
+        raizes.append(BASE_CONHECIMENTO_PATH)
+    extra = _get_extra_kb_root()
+    if extra is not None and extra.exists() and extra not in raizes:
+        raizes.append(extra)
+
     arquivos: list[Path] = []
-    for caminho in sorted(BASE_CONHECIMENTO_PATH.rglob("*")):
-        if not caminho.is_file():
-            continue
-        if caminho.suffix.lower() not in _EXTENSOES_VALIDAS:
-            continue
-        if any(p in _PASTAS_IGNORADAS for p in caminho.parts):
-            continue
-        if caminho.name.lower() == "readme.md":
-            continue
-        arquivos.append(caminho)
+    for raiz in raizes:
+        for caminho in sorted(raiz.rglob("*")):
+            if not caminho.is_file():
+                continue
+            if caminho.suffix.lower() not in _EXTENSOES_VALIDAS:
+                continue
+            if any(p in _PASTAS_IGNORADAS for p in caminho.parts):
+                continue
+            if caminho.name.lower() == "readme.md":
+                continue
+            arquivos.append(caminho)
     return arquivos
 
 
@@ -395,7 +431,7 @@ def indexar(forcar: bool = False, verbose: bool = True) -> int:
         return 0
 
     for arq in arquivos:
-        rel = arq.relative_to(BASE_CONHECIMENTO_PATH)
+        rel = _rel_kb_path(arq)
         rel_str = rel.as_posix()
         try:
             texto = arq.read_text(encoding="utf-8")
@@ -683,7 +719,7 @@ def indexar_pesquisa_agente(
     if not content or not content.strip():
         raise ValueError("Conteúdo da pesquisa não pode ser vazio para indexação.")
 
-    raiz_kb = base_dir or BASE_CONHECIMENTO_PATH
+    raiz_kb = base_dir or _get_extra_kb_root() or BASE_CONHECIMENTO_PATH
     pasta_curados = raiz_kb / "agentes_curados"
     pasta_curados.mkdir(parents=True, exist_ok=True)
 
@@ -784,7 +820,7 @@ def listar_documentos_conhecimento(limit: int = 40) -> list[dict[str, Any]]:
     for arq in arquivos:
         try:
             st = arq.stat()
-            rel = arq.relative_to(BASE_CONHECIMENTO_PATH)
+            rel = _rel_kb_path(arq)
             rel_str = rel.as_posix()
             partes = rel.parts
             categoria = partes[0] if len(partes) > 1 else "geral"
